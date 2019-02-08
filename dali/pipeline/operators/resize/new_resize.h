@@ -16,6 +16,9 @@
 #ifndef DALI_PIPELINE_OPERATORS_RESIZE_NEW_RESIZE_H_
 #define DALI_PIPELINE_OPERATORS_RESIZE_NEW_RESIZE_H_
 
+#if defined(__AARCH64_QNX__)
+#include <cuda_runtime.h>
+#endif
 #include <npp.h>
 #include <random>
 #include <ctgmath>
