@@ -15,7 +15,9 @@
 #include "dali/image/jpeg.h"
 #include <cmath>
 #include <memory>
+#if !defined(__AARCH64_GNU__) && !defined(__AARCH64_QNX__)
 #include "dali/image/jpeg_mem.h"
+#endif
 #include "dali/util/ocv.h"
 
 namespace dali {
