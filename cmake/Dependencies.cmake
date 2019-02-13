@@ -4,19 +4,19 @@
 # Google C++ testing framework
 ##################################################################
 if (BUILD_TEST)
-    set(BUILD_GTEST ON CACHE INTERNAL "Build gtest submodule")
-    set(BUILD_GMOCK OFF CACHE INTERNAL "Build gmock submodule")
-    check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/googletest EXCLUDE_FROM_ALL)
-    include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
+  set(BUILD_GTEST ON CACHE INTERNAL "Build gtest submodule")
+  set(BUILD_GMOCK OFF CACHE INTERNAL "Build gmock submodule")
+  check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/googletest EXCLUDE_FROM_ALL)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
 endif()
 
 ##################################################################
 # Google Benchmark
 ##################################################################
 if (BUILD_BENCHMARK)
-    set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "Build benchmark testsuite")
-    check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/benchmark EXCLUDE_FROM_ALL)
-    include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/benchmark/include/benchmark)
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "Build benchmark testsuite")
+  check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/benchmark EXCLUDE_FROM_ALL)
+  include_directories(SYSTEM ${PROJECT_SOURCE_DIR}/third_party/benchmark/include/benchmark)
 endif()
 
 ##################################################################
@@ -44,8 +44,8 @@ if (BUILD_NVJPEG)
     add_definitions(-DNVJPEG_LIBRARY_0_2_0)
   endif()
 else()
-    # Note: Support for disabling nvJPEG is unofficial
-    message(STATUS "Building WITHOUT nvJPEG")
+  # Note: Support for disabling nvJPEG is unofficial
+  message(STATUS "Building WITHOUT nvJPEG")
 endif()
 
 # NVIDIA NPPC library
@@ -53,22 +53,22 @@ find_cuda_helper_libs(nppc_static)
 
 # NVIDIA NPPI library
 if (${CUDA_VERSION} VERSION_LESS "9.0")
-    # In CUDA 8, NPPI is a single library
-    find_cuda_helper_libs(nppi_static)
-    list(APPEND DALI_LIBS ${CUDA_nppi_static_LIBRARY})
-    list(APPEND DALI_EXCLUDES libnppi_static.a)
+  # In CUDA 8, NPPI is a single library
+  find_cuda_helper_libs(nppi_static)
+  list(APPEND DALI_LIBS ${CUDA_nppi_static_LIBRARY})
+  list(APPEND DALI_EXCLUDES libnppi_static.a)
 
 else()
 
-    find_cuda_helper_libs(nppicom_static)
-    find_cuda_helper_libs(nppicc_static)
-    find_cuda_helper_libs(nppig_static)
-    list(APPEND DALI_LIBS ${CUDA_nppicom_static_LIBRARY}
-        ${CUDA_nppicc_static_LIBRARY}
-        ${CUDA_nppig_static_LIBRARY})
-    list(APPEND DALI_EXCLUDES libnppicom_static.a
-        libnppicc_static.a
-        libnppig_static.a)
+  find_cuda_helper_libs(nppicom_static)
+  find_cuda_helper_libs(nppicc_static)
+  find_cuda_helper_libs(nppig_static)
+  list(APPEND DALI_LIBS ${CUDA_nppicom_static_LIBRARY}
+    ${CUDA_nppicc_static_LIBRARY}
+    ${CUDA_nppig_static_LIBRARY})
+  list(APPEND DALI_EXCLUDES libnppicom_static.a
+    libnppicc_static.a
+    libnppig_static.a)
 endif()
 list(APPEND DALI_LIBS ${CUDA_nppc_static_LIBRARY})
 list(APPEND DALI_EXCLUDES libnppc_static.a)
@@ -80,9 +80,9 @@ list(APPEND DALI_EXCLUDES libculibos.a)
 
 # NVTX for profiling
 if (BUILD_NVTX)
-    find_cuda_helper_libs(nvToolsExt)
-    list(APPEND DALI_LIBS ${CUDA_nvToolsExt_LIBRARY})
-    add_definitions(-DDALI_USE_NVTX)
+  find_cuda_helper_libs(nvToolsExt)
+  list(APPEND DALI_LIBS ${CUDA_nvToolsExt_LIBRARY})
+  add_definitions(-DDALI_USE_NVTX)
 endif()
 
 ##################################################################
@@ -95,8 +95,8 @@ if (BUILD_JPEG_TURBO)
   list(APPEND DALI_LIBS ${JPEG_LIBRARY})
   add_definitions(-DDALI_USE_JPEG_TURBO)
 else()
-    # Note: Support for disabling libjpeg-turbo is unofficial
-    message(STATUS "Building WITHOUT JpegTurbo")
+  # Note: Support for disabling libjpeg-turbo is unofficial
+  message(STATUS "Building WITHOUT JpegTurbo")
 endif()
 
 ##################################################################
@@ -108,35 +108,33 @@ if(NOT OpenCV_FOUND)
   find_package(OpenCV 3.0 QUIET COMPONENTS core imgproc imgcodecs)
 endif()
 if(NOT OpenCV_FOUND)
-    # Note: OpenCV 2 support is unofficial
-    # For OpenCV 2.x, image encode/decode functions are in highgui
-    find_package(OpenCV 2.0 REQUIRED COMPONENTS core imgproc highgui)
+  # Note: OpenCV 2 support is unofficial
+  # For OpenCV 2.x, image encode/decode functions are in highgui
+  find_package(OpenCV 2.0 REQUIRED COMPONENTS core imgproc highgui)
 endif()
 
 message(STATUS "Found OpenCV: ${OpenCV_INCLUDE_DIRS} (found suitable version \"${OpenCV_VERSION}\", minimum required is \"2.0\")")
 include_directories(SYSTEM ${OpenCV_INCLUDE_DIRS})
 list(APPEND DALI_LIBS ${OpenCV_LIBRARIES})
 message("OpenCV libraries: ${OpenCV_LIBRARIES}")
-list(APPEND DALI_EXCLUDES libopencv_core.a;libopencv_imgproc.a;libopencv_highgui.a;libopencv_imgcodecs.a;
-                          liblibwebp.a;libittnotify.a;libpng.a;liblibtiff.a;liblibjasper.a;libIlmImf.a;
-                          liblibjpeg-turbo.a)
+list(APPEND DALI_EXCLUDES libopencv_core.a;libopencv_imgproc.a;libopencv_highgui.a;libopencv_imgcodecs.a;liblibwebp.a;libittnotify.a;libpng.a;liblibtiff.a;liblibjasper.a;libIlmImf.a;liblibjpeg-turbo.a)
 
 ##################################################################
 # PyBind
 ##################################################################
 if (BUILD_PYTHON)
-    set(PYBIND11_CPP_STANDARD -std=c++11)
-    check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/pybind11)
+  set(PYBIND11_CPP_STANDARD -std=c++11)
+  check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/pybind11)
 endif()
 
 ##################################################################
 # LMDB
 ##################################################################
 if (BUILD_LMDB)
-    find_package(LMDB 0.9 REQUIRED)
-    include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
-    list(APPEND DALI_LIBS ${LMDB_LIBRARIES})
-    list(APPEND DALI_EXCLUDES liblmdb.a)
+  find_package(LMDB 0.9 REQUIRED)
+  include_directories(SYSTEM ${LMDB_INCLUDE_DIR})
+  list(APPEND DALI_LIBS ${LMDB_LIBRARIES})
+  list(APPEND DALI_EXCLUDES liblmdb.a)
 endif()
 
 ##################################################################
@@ -146,11 +144,11 @@ endif()
 set(Protobuf_USE_STATIC_LIBS "ON")
 find_package(Protobuf 2.0 REQUIRED)
 if(${Protobuf_VERSION} VERSION_LESS "3.0")
-    message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
+  message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
 else()
-    message(STATUS "Enabling TensorFlow TFRecord file format support")
-    add_definitions(-DDALI_BUILD_PROTO3=1)
-    set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
+  message(STATUS "Enabling TensorFlow TFRecord file format support")
+  add_definitions(-DDALI_BUILD_PROTO3=1)
+  set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
 endif()
 
 include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIRS})
@@ -170,19 +168,19 @@ set(FFMPEG_ROOT_DIR "" CACHE PATH "Folder contains FFmeg")
 
 find_package(PkgConfig REQUIRED)
 foreach(m avformat avcodec avfilter avutil)
-    # We do a find_library only if FFMPEG_ROOT_DIR is provided
-    if(NOT FFMPEG_ROOT_DIR)
-      string(TOUPPER ${m} M)
-      pkg_check_modules(${m} REQUIRED lib${m})
-      list(APPEND FFmpeg_LIBS ${m})
-    else()
-      find_library(FFmpeg_Lib ${m}
-            PATHS ${FFMPEG_ROOT_DIR}
-            PATH_SUFFIXES lib lib64
-            NO_DEFAULT_PATH)
-      list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
-      message(STATUS ${m})
-    endif()
+  # We do a find_library only if FFMPEG_ROOT_DIR is provided
+  if(NOT FFMPEG_ROOT_DIR)
+    string(TOUPPER ${m} M)
+    pkg_check_modules(${m} REQUIRED lib${m})
+    list(APPEND FFmpeg_LIBS ${m})
+  else()
+    find_library(FFmpeg_Lib ${m}
+      PATHS ${FFMPEG_ROOT_DIR}
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH)
+    list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
+    message(STATUS ${m})
+  endif()
 endforeach(m)
 
 include_directories(${avformat_INCLUDE_DIRS})
