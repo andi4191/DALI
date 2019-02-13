@@ -15,8 +15,8 @@
 # Get all the source files and dump test files
 file(GLOB tmp *.cc *.cu)
 if(DEFINED ARCH)
-    message("Removing Video_loader")
-    list(REMOVE_ITEM tmp ${CMAKE_CURRENT_SOURCE_DIR}/video_loader.cc)
+  message("Removing Video_loader")
+  list(REMOVE_ITEM tmp ${CMAKE_CURRENT_SOURCE_DIR}/video_loader.cc)
 endif()
 set(DALI_SRCS ${DALI_SRCS} ${tmp})
 file(GLOB tmp *_test.cc)

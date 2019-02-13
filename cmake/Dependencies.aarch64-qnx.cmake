@@ -10,8 +10,8 @@ set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_HOST})
 set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TARGET})
     
 find_library(CUDA_CUDART_LIBRARY cudart
-    PATHS ${CUDA_TOOLKIT_TARGET_DIR}
-    PATH_SUFFIXES lib64 lib)
+  PATHS ${CUDA_TOOLKIT_TARGET_DIR}
+  PATH_SUFFIXES lib64 lib)
 
 message(STATUS "Found cudart at ${CUDA_CUDART_LIBRARY}")
 
@@ -23,17 +23,17 @@ set(CUDA_USE_STATIC_CUDA_RUNTIME OFF CACHE BOOL "QNX does not have librt.so")
 
 # Check QNX
 if(NOT DEFINED ENV{QNX_TARGET} OR NOT DEFINED ENV{QNX_HOST})
-    message("QNX_TARGET and QNX_HOST not exported")
+  message("QNX_TARGET and QNX_HOST not exported")
 endif()
 
 set(CMAKE_SYSROOT $ENV{QNX_TARGET})
 
 if(NOT IS_DIRECTORY ${CMAKE_SYSROOT}/aarch64le)
-    message(FATAL_ERROR"[ERROR] Please set $QNX_TARGET like below.\n $ export QNX_TARGET=/PATH/TO/qnx700/target/qnx7\n")
+  message(FATAL_ERROR"[ERROR] Please set $QNX_TARGET like below.\n $ export QNX_TARGET=/PATH/TO/qnx700/target/qnx7\n")
 endif()
 
 if(NOT EXISTS ${CMAKE_C_COMPILER})
-    message(FATAL_ERROR "[ERROR] Please set $QNX_HOST like below.\n $ export QNX_HOST=/ PATH/TO/qnx700/host/linux/x86_64\n")
+  message(FATAL_ERROR "[ERROR] Please set $QNX_HOST like below.\n $ export QNX_HOST=/ PATH/TO/qnx700/host/linux/x86_64\n")
 endif()
 
 list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/libcudart.so)
@@ -49,9 +49,9 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L${CUDA_LIBRARIES} -L${CUDA_LIBRARIES}/
 
 # NVTX for profiling
 if (BUILD_NVTX)
-    find_cuda_helper_libs(nvToolsExt)
-	list(APPEND DALI_LIBS ${CUDA_nvToolsExt_LIBRARY})
-    add_definitions(-DDALI_USE_NVTX)
+  find_cuda_helper_libs(nvToolsExt)
+  list(APPEND DALI_LIBS ${CUDA_nvToolsExt_LIBRARY})
+  add_definitions(-DDALI_USE_NVTX)
 endif()
 
 ##################################################################
@@ -60,7 +60,7 @@ endif()
 
 # Path to architecture specific opencv
 if(NOT DEFINED OPENCV_PATH)
-    message("OpenCV path not exported for architecture configured")
+  message("OpenCV path not exported for architecture configured")
 endif()
 
 set(OpenCV_INCLUDE_DIRS ${OPENCV_PATH}/include)
@@ -78,11 +78,11 @@ list(APPEND DALI_LIBS ${OpenCV_LIBRARIES}/libopencv_imgcodecs.so)
 
 find_package(Protobuf 2.0 REQUIRED)
 if(${Protobuf_VERSION} VERSION_LESS "3.0")
-    message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
+  message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
 else()
-    message(STATUS "Enabling TensorFlow TFRecord file format support")
-    add_definitions(-DDALI_BUILD_PROTO3=1)
-    set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
+  message(STATUS "Enabling TensorFlow TFRecord file format support")
+  add_definitions(-DDALI_BUILD_PROTO3=1)
+  set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
 endif()
 
 include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIRS})
@@ -106,19 +106,19 @@ include(CheckStructHasMember)
 include(CheckTypeSize)
 
 foreach(m avformat avcodec avfilter avutil)
-    # We do a find_library only if FFMPEG_ROOT_DIR is provided
-    if(NOT FFMPEG_ROOT_DIR)
-        string(TOUPPER ${m} M)
-        pkg_check_modules(${m} REQUIRED lib${m})
-        list(APPEND FFmpeg_LIBS ${m})
-    else()
-        find_library(FFmpeg_Lib ${m}
-            PATHS ${FFMPEG_ROOT_DIR}
-            PATH_SUFFIXES lib lib64
-            NO_DEFAULT_PATH)
-        list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
-        message(STATUS ${m})
-    endif()
+  # We do a find_library only if FFMPEG_ROOT_DIR is provided
+  if(NOT FFMPEG_ROOT_DIR)
+    string(TOUPPER ${m} M)
+    pkg_check_modules(${m} REQUIRED lib${m})
+    list(APPEND FFmpeg_LIBS ${m})
+  else()
+    find_library(FFmpeg_Lib ${m}
+      PATHS ${FFMPEG_ROOT_DIR}
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH)
+    list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
+    message(STATUS ${m})
+  endif()
 endforeach(m)
 
 include_directories(${avformat_INCLUDE_DIRS})
