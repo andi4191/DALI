@@ -93,21 +93,21 @@ void *Allocate(AllocType type, size_t size) noexcept {
 #else
     void *ptr = nullptr;
     switch (type) {
-    case AllocType::Host:
-           ptr = Allocator<AllocType::Host>::Allocate(size);
-           break;
-    case AllocType::Pinned:
-           ptr = Allocator<AllocType::Pinned>::Allocate(size);
-           break;
-    case AllocType::GPU:
-           ptr = Allocator<AllocType::GPU>::Allocate(size);
-           break;
-    case AllocType::Unified:
-           ptr = Allocator<AllocType::Unified>::Allocate(size);
-           break;
-    default:
-           assert(!"Invalid allocation type requested");
-           break;
+      case AllocType::Host:
+        ptr = Allocator<AllocType::Host>::Allocate(size);
+        break;
+      case AllocType::Pinned:
+        ptr = Allocator<AllocType::Pinned>::Allocate(size);
+        break;
+      case AllocType::GPU:
+        ptr = Allocator<AllocType::GPU>::Allocate(size);
+        break;
+      case AllocType::Unified:
+        ptr = Allocator<AllocType::Unified>::Allocate(size);
+        break;
+      default:
+        assert(!"Invalid allocation type requested");
+        break;
     }
     return ptr;
 #endif
@@ -122,21 +122,21 @@ void Deallocate(AllocType type, void *mem, int device) noexcept {
   );  // NOLINT
 #else
   switch (type) {
-      case AllocType::Host:
-          Allocator<AllocType::Host>::Deallocate(mem, device);
-          break;
-      case AllocType::Pinned:
-          Allocator<AllocType::Pinned>::Deallocate(mem, device);
-          break;
-      case AllocType::GPU:
-          Allocator<AllocType::GPU>::Deallocate(mem, device);
-          break;
-      case AllocType::Unified:
-          Allocator<AllocType::Unified>::Deallocate(mem, device);
-          break;
-      default:
-          assert(!"Invalid Deallocation type requested");
-          break;
+    case AllocType::Host:
+      Allocator<AllocType::Host>::Deallocate(mem, device);
+      break;
+    case AllocType::Pinned:
+      Allocator<AllocType::Pinned>::Deallocate(mem, device);
+      break;
+    case AllocType::GPU:
+      Allocator<AllocType::GPU>::Deallocate(mem, device);
+      break;
+    case AllocType::Unified:
+      Allocator<AllocType::Unified>::Deallocate(mem, device);
+      break;
+    default:
+      assert(!"Invalid Deallocation type requested");
+      break;
   }
 #endif
 }

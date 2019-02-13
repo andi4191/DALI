@@ -15,7 +15,7 @@ set(CMAKE_CXX_COMPILER_TARGET aarch64)
 add_definitions(-D__AARCH64_GNU__)
 set(CMAKE_LINKER /usr/bin/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu-ld)
 
-set(LINKER_FLAGS "-Wl,--no-undefined -Wl,--gc-sections -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now,-lc -pthread -lpthread -ldl")    
+set(LINKER_FLAGS "-Wl,--no-undefined -Wl,--gc-sections -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now,-lc -pthread -lpthread -ldl")
 
 set(CMAKE_FIND_LIBRARY_PREFIXES "lib")
 set(CMAKE_FIND_LIBRARY_SUFFIXES ".so,.a")
@@ -25,9 +25,9 @@ set(CMAKE_MODULE_LINKER_FLAGS "${LINKER_FLAGS} ${CMAKE_MODULE_LINKER_FLAGS}")
 set(CMAKE_EXE_LINKER_FLAGS "${LINKER_FLAGS} ${CMAKE_EXE_LINKER_FLAGS}")
 
 include_directories(
-     ${PROTOBUF_TARGET}/include
-     /usr/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu/include
-     set(CMAKE_FIND_ROOT_PATH  ${AGNOSTIC_BASE})
-     set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-     set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-    )
+  ${PROTOBUF_TARGET}/include
+  /usr/${CMAKE_SYSTEM_PROCESSOR}-linux-gnu/include
+  set(CMAKE_FIND_ROOT_PATH  ${AGNOSTIC_BASE})
+  set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+  set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+)
