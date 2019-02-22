@@ -167,10 +167,6 @@ CMD echo "VERSIONS:\n    opencv-${OPENCV_VERSION}\n    protobuf-${PROTOBUF_VERSI
 -DCUDA_HOST=/usr/local/cuda-10.0 \
 -DOPENCV_PATH=/usr/aarch64-linux-gnu/ \
 -DCUDA_TARGET=/usr/local/cuda-10.0/targets/aarch64-linux \
--DPROTOBUF_TARGET=/usr/aarch64-linux-gnu/ \
 -DProtobuf_LIBRARIES=/usr/aarch64-linux-gnu/lib \
--DPROTO_LIB_PATH=/usr/aarch64-linux-gnu/lib \
--DProtobuf_DEBUG=ON \
 -DFFMPEG_ROOT_DIR=/usr/aarch64-linux-gnu/ \
--DProtobuf_DEBUG=ON \
 ../ && make install -j12
