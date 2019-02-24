@@ -31,8 +31,8 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -L${CUDA_LIBRARIES} -L${CUDA_LIBRARIES}/
 
 # NVTX for profiling
 if (BUILD_NVTX)
-    list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/libnvToolsExt.so)
-    add_definitions(-DDALI_USE_NVTX)
+  list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/libnvToolsExt.so)
+  add_definitions(-DDALI_USE_NVTX)
 endif()
 
 
@@ -42,7 +42,7 @@ endif()
 
 # Path to architecture specific opencv
 if(NOT DEFINED OPENCV_PATH)
-    message("OpenCV path not exported for architecture configured")
+  message("OpenCV path not exported for architecture configured")
 endif()
 
 message(STATUS "Found OpenCV at ${OPENCV_PATH}")
@@ -60,8 +60,8 @@ list(APPEND DALI_LIBS ${OpenCV_LIBRARIES}/libopencv_imgcodecs.so)
 # PyBind
 ##################################################################
 if (BUILD_PYTHON)
-    set(PYBIND11_CPP_STANDARD -std=c++11)
-    check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/pybind11)
+  set(PYBIND11_CPP_STANDARD -std=c++11)
+  check_and_add_cmake_submodule(${PROJECT_SOURCE_DIR}/third_party/pybind11)
 endif()
 
 ##################################################################
@@ -69,11 +69,11 @@ endif()
 ##################################################################
 find_package(Protobuf 2.0 REQUIRED)
 if(${Protobuf_VERSION} VERSION_LESS "3.0")
-    message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
+  message(STATUS "TensorFlow TFRecord file format support is not available with Protobuf 2")
 else()
-    message(STATUS "Enabling TensorFlow TFRecord file format support")
-    add_definitions(-DDALI_BUILD_PROTO3=1)
-    set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
+  message(STATUS "Enabling TensorFlow TFRecord file format support")
+  add_definitions(-DDALI_BUILD_PROTO3=1)
+  set(BUILD_PROTO3 ON CACHE STRING "Build proto3")
 endif()
 
 include_directories(SYSTEM ${PROTOBUF_INCLUDE_DIRS})
@@ -91,19 +91,19 @@ include(CheckStructHasMember)
 include(CheckTypeSize)
 
 foreach(m avformat avcodec avfilter avutil)
-    # We do a find_library only if FFMPEG_ROOT_DIR is provided
-    if(NOT FFMPEG_ROOT_DIR)
-      string(TOUPPER ${m} M)
-      pkg_check_modules(${m} REQUIRED lib${m})
-      list(APPEND FFmpeg_LIBS ${m})
-    else()
-      find_library(FFmpeg_Lib ${m}
-            PATHS ${FFMPEG_ROOT_DIR}
-            PATH_SUFFIXES lib lib64
-            NO_DEFAULT_PATH)
-      list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
-      message(STATUS ${m})
-    endif()
+  # We do a find_library only if FFMPEG_ROOT_DIR is provided
+  if(NOT FFMPEG_ROOT_DIR)
+    string(TOUPPER ${m} M)
+    pkg_check_modules(${m} REQUIRED lib${m})
+    list(APPEND FFmpeg_LIBS ${m})
+  else()
+    find_library(FFmpeg_Lib ${m}
+      PATHS ${FFMPEG_ROOT_DIR}
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH)
+    list(APPEND FFmpeg_LIBS ${FFmpeg_Lib})
+    message(STATUS ${m})
+  endif()
 endforeach(m)
 
 include_directories(${avformat_INCLUDE_DIRS})
