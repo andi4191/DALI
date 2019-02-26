@@ -18,7 +18,7 @@ limitations under the License.
 // This file defines functions to compress and uncompress JPEG data
 // to and from memory, as well as some direct manipulations of JPEG string
 
-#if !defined(__AARCH64_GNU__) && !defined(__AARCH64_QNX__)
+#if !defined(__AARCH64_QNX__)
 #include "dali/image/jpeg_mem.h"
 #include <setjmp.h>
 #include <cstring>
