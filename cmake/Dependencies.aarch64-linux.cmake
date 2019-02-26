@@ -113,3 +113,17 @@ set(CMAKE_EXTRA_INCLUDE_FILES libavcodec/avcodec.h)
 CHECK_TYPE_SIZE("AVBSFContext" AVBSFCONTEXT LANGUAGE CXX)
 
 list(APPEND DALI_LIBS ${FFmpeg_LIBS})
+
+##################################################################
+# libjpeg-turbo
+##################################################################
+if (BUILD_JPEG_TURBO)
+  find_package(JPEG 62 REQUIRED) # 1.5.3 version
+  include_directories(SYSTEM ${JPEG_INCLUDE_DIR})
+  message("Using libjpeg-turbo at ${JPEG_LIBRARY}")
+  list(APPEND DALI_LIBS ${JPEG_LIBRARY})
+  add_definitions(-DDALI_USE_JPEG_TURBO)
+else()
+  # Note: Support for disabling libjpeg-turbo is unofficial
+  message(STATUS "Building WITHOUT JpegTurbo")
+endif()
