@@ -172,4 +172,4 @@ CMD echo "VERSIONS:\n    opencv-${OPENCV_VERSION}\n    protobuf-${PROTOBUF_VERSI
 -DCUDA_TARGET=/usr/local/cuda-10.0/targets/aarch64-linux \
 -DProtobuf_LIBRARIES=/usr/aarch64-linux-gnu/lib \
 -DFFMPEG_ROOT_DIR=/usr/aarch64-linux-gnu/ \
-../ && make install -j12 
+../ && make install -j12
