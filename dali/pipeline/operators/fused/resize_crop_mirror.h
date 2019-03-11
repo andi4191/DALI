@@ -30,6 +30,10 @@
 typedef unsigned int uint;
 #endif
 
+#if defined(__AARCH64_QNX__)
+typedef unsigned int uint;
+#endif
+
 namespace dali {
 
 typedef enum {

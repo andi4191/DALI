@@ -22,7 +22,6 @@ list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/stubs/libnppc.so)
 list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/stubs/libnppicom.so)
 list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/stubs/libnppicc.so)
 list(APPEND DALI_LIBS ${CUDA_LIBRARIES}/stubs/libnppig.so)
-#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -lculibos")
 
 include_directories(${CUDA_TOOLKIT_TARGET_DIR}/include)
 include_directories(${CUDA_TOOLKIT_ROOT_DIR}/include)

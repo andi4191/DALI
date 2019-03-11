@@ -39,8 +39,8 @@ static int _sysctl(struct __sysctl_args *args);
 
 static int get_max_vm_cnt() {
   int vm_cnt = 1;
-#if !defined(__AARCH64_QNX__) && !defined(__AARCH64_GNU__)
   size_t vm_cnt_sz;
+#if !defined(__AARCH64_QNX__) && !defined(__AARCH64_GNU__)
   int name[] = { CTL_VM, VM_MAX_MAP_COUNT };
   struct __sysctl_args args = {0, };
 
