@@ -39,6 +39,12 @@ RUN apt-get update \
    && rm -rf /var/lib/apt/lists/* \
    && rm -rf /tmp/cuda-packages.txt 
 
+# Boost
+RUN BOOST_VERSION=1_66_0 \
+   && cd /usr/local \
+   && curl -L https://dl.bintray.com/boostorg/release/1.66.0/source/boost_${BOOST_VERSION}.tar.gz | tar -xzf - \
+   && ln -s ../boost_${BOOST_VERSION}/boost include/boost
+
 # CMake
 RUN CMAKE_VERSION=3.5 && \
     CMAKE_BUILD=3.5.0 && \
