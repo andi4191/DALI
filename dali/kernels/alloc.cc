@@ -15,12 +15,11 @@
 #include <cuda_runtime.h>
 #include <cassert>
 #include "dali/kernels/alloc.h"
-#if !defined(__AARCH64_GNU__) && !defined(__AARCH64_QNX__)
 #include "dali/kernels/static_switch.h"
-#else
+#include "dali/kernels/gpu_utils.h"
+#if defined(__AARCH64_QNX__)
 #include <stdlib.h>
 #endif
-#include "dali/kernels/gpu_utils.h"
 
 namespace dali {
 namespace kernels {

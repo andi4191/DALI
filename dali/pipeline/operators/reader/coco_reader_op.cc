@@ -367,8 +367,8 @@ void ParseAnnotationFilesHelper(std::vector<std::string> &annotations_filename,
         r.EnterArray();
         int id;
         string image_file_name;
-        int width;
-        int height;
+        int width=0;
+        int height=0;
         while (r.NextArrayValue()) {
           if (r.PeekType() != kObjectType) {
             continue;
