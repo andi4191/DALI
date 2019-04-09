@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "dali/test/dali_test_matching.h"
+#include "dali/test/dali_test_utils.h"
 
 namespace dali {
 
@@ -32,7 +33,7 @@ class CropMirrorNormalizePermuteTest : public GenericMatchingTest<ImgType> {
     this->SetExternalInputs({{"jpegs", &data}});
 
     string device(deviceName);
-    this->setOpType(device == "gpu" ? DALI_GPU : DALI_CPU);
+    this->SetOpType(device == "gpu" ? OpType::GPU : OpType::CPU);
     OpSpec spec = OpSpec(opName)
                       .AddArg("device", device)
                       .AddInput("images", device)
@@ -82,7 +83,7 @@ const bool doMirroring = true;
 
 typedef ::testing::Types<RGB, BGR, Gray> Types;
 
-TYPED_TEST_CASE(CropMirrorNormalizePermuteTest, Types);
+TYPED_TEST_SUITE(CropMirrorNormalizePermuteTest, Types);
 
 TYPED_TEST(CropMirrorNormalizePermuteTest, DISABLED_MultipleDataGPU) {
   this->RunTestByDevice("gpu", !doMirroring);
@@ -110,7 +111,7 @@ TYPED_TEST(CropMirrorNormalizePermuteTest, Layout_DALI_NCHW) {
   static const OpArg params[] = {{"crop", "224, 224", DALI_FLOAT_VEC},
                                  {"mean", "0.", DALI_FLOAT_VEC},
                                  {"std", "1.", DALI_FLOAT_VEC},
-                                 {"output_layout", "0", DALI_INT32}};
+                                 {"output_layout", EnumToString(DALI_NCHW), DALI_INT32}};
 
   this->RunTest(opName, params, sizeof(params) / sizeof(params[0]),
                 addImageType, eps);
@@ -120,7 +121,7 @@ TYPED_TEST(CropMirrorNormalizePermuteTest, Layout_DALI_NHWC) {
   static const OpArg params[] = {{"crop", "224, 224", DALI_FLOAT_VEC},
                                  {"mean", "0.", DALI_FLOAT_VEC},
                                  {"std", "1.", DALI_FLOAT_VEC},
-                                 {"output_layout", "1", DALI_INT32}};
+                                 {"output_layout", EnumToString(DALI_NHWC), DALI_INT32}};
 
   this->RunTest(opName, params, sizeof(params) / sizeof(params[0]),
                 addImageType, eps);
@@ -130,7 +131,7 @@ TYPED_TEST(CropMirrorNormalizePermuteTest, Layout_DALI_SAME) {
   static const OpArg params[] = {{"crop", "224, 224", DALI_FLOAT_VEC},
                                  {"mean", "0.", DALI_FLOAT_VEC},
                                  {"std", "1.", DALI_FLOAT_VEC},
-                                 {"output_layout", "3", DALI_INT32}};
+                                 {"output_layout", EnumToString(DALI_SAME), DALI_INT32}};
 
   this->RunTest(opName, params, sizeof(params) / sizeof(params[0]),
                 addImageType, eps);

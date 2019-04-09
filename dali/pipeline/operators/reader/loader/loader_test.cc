@@ -36,7 +36,7 @@ class DataLoadStoreTest : public DALITest {
 typedef ::testing::Types<CPUBackend> TestTypes;
 string loader_test_image_folder = "/data/dali/benchmark";  // NOLINT
 
-TYPED_TEST_CASE(DataLoadStoreTest, TestTypes);
+TYPED_TEST_SUITE(DataLoadStoreTest, TestTypes);
 
 const char* path = std::getenv("DALI_TEST_CAFFE_LMDB_PATH");
 
@@ -45,13 +45,15 @@ TYPED_TEST(DataLoadStoreTest, LMDBTest) {
       new LMDBReader(
           OpSpec("CaffeReader")
           .AddArg("batch_size", 32)
-          .AddArg("path", string(path))));
+          .AddArg("path", string(path))
+          .AddArg("device_id", 0)));
+
+  reader->PrepareMetadata();
 
   for (int i = 0; i < 10500; ++i) {
     // grab an entry from the reader
-    auto* sample = reader->ReadOne();
     // return the tensor to the reader for refilling
-    reader->ReturnTensor(sample);
+    reader->RecycleTensor(reader->ReadOne());
   }
 
   return;
@@ -62,13 +64,15 @@ TYPED_TEST(DataLoadStoreTest, LoaderTest) {
       new FileLoader(
           OpSpec("FileReader")
           .AddArg("file_root", loader_test_image_folder)
-          .AddArg("batch_size", 32)));
+          .AddArg("batch_size", 32)
+          .AddArg("device_id", 0)));
+
+  reader->PrepareMetadata();
 
   for (int i = 0; i < 11; ++i) {
     // grab an entry from the reader
-    auto* sample = reader->ReadOne();
     // return the tensor to the reader for refilling
-    reader->ReturnTensor(sample);
+    reader->RecycleTensor(reader->ReadOne());
   }
 
   return;
@@ -80,7 +84,9 @@ TYPED_TEST(DataLoadStoreTest, LoaderTestFail) {
         new FileLoader(
             OpSpec("FileReader")
             .AddArg("file_root", loader_test_image_folder + "/benchmark_images")
-            .AddArg("batch_size", 32)));
+            .AddArg("batch_size", 32)
+            .AddArg("device_id", 0)));
+        reader->PrepareMetadata();
   }
   catch (std::runtime_error &e) {
     return;
@@ -101,7 +107,7 @@ TYPED_TEST(DataLoadStoreTest, CachedLMDBTest) {
     // grab an entry from the reader
     auto* sample = reader->ReadOne();
     // return the tensor to the reader for refilling
-    reader->ReturnTensor(sample);
+    reader->RecycleTensor(sample);
   }
 
   return;

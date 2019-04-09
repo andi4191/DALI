@@ -72,12 +72,6 @@ TEST_F(RandomCropGeneratorTest, DifferentSeedProduceDifferentResultBatchedVersio
     }
 }
 
-TEST_F(RandomCropGeneratorTest, EmptyDimensions) {
-    EXPECT_THROW(
-        MakeGenerator().GenerateCropWindow(0, 0),
-        std::runtime_error);
-}
-
 TEST_F(RandomCropGeneratorTest, DimensionH1W1) {
     for (auto crop : MakeGenerator().GenerateCropWindows(1, 1, 1000)) {
         EXPECT_TRUE(crop.IsInRange(1, 1));
@@ -103,6 +97,37 @@ TEST_F(RandomCropGeneratorTest, DimensionW1) {
         EXPECT_EQ(0, crop.x);
         EXPECT_EQ(1, crop.h);
         EXPECT_EQ(1, crop.w);
+    }
+}
+
+
+TEST_F(RandomCropGeneratorTest, AspectRatio) {
+    float min_ratio = 0.8f;
+    float max_ratio = 2.0f;
+    RandomCropGenerator gen({ min_ratio, max_ratio }, { 0.1f, 0.9f }, 12345);
+
+    std::mt19937_64 rng(4321);
+    std::uniform_int_distribution<int> s_dist(1, 2048);
+    std::uniform_real_distribution<float> r_dist(0.5f, 2.0f);
+    for (int i = 0; i < 10000; i++) {
+      float s = s_dist(rng);
+      float r = r_dist(rng);
+      int W = std::roundf(s*r);
+      int H = std::roundf(s/r);
+      if (!W) W = 1;
+      if (!H) H = 1;
+      CropWindow window = gen.GenerateCropWindow(H, W);
+      float aspect = static_cast<float>(window.w) / window.h;
+      EXPECT_GE(aspect, min_ratio) << window.w << "x" << window.h;
+      EXPECT_LE(aspect, max_ratio) << window.w << "x" << window.h;
+      EXPECT_GE(window.w, 1) << window.w << "x" << window.h;
+      EXPECT_GE(window.h, 1) << window.w << "x" << window.h;
+      EXPECT_LE(window.w, W) << window.w << "x" << window.h;
+      EXPECT_LE(window.h, H) << window.w << "x" << window.h;
+      EXPECT_LT(window.x, W) << window.x << "x" << window.y;
+      EXPECT_LT(window.y, H) << window.x << "x" << window.y;
+      EXPECT_LE(window.x + window.w, W) << window.x << "x" << window.y;
+      EXPECT_LE(window.y + window.h, H) << window.x << "x" << window.y;
     }
 }
 

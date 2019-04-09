@@ -46,6 +46,7 @@ class ImgSetDescr {
 
   vector<uint8 *> data_;
   vector<int> sizes_;
+  vector<string> filenames_;
 };
 
 /**
@@ -55,26 +56,13 @@ class ImgSetDescr {
 DLL_PUBLIC void LoadImages(const vector<string> &image_names, ImgSetDescr *imgs);
 
 /**
- * Loads images from a specified image folder. Assumes the folder contains
- * a file 'image_list.txt' that lists all the different images in the
- * folder
+ * Load filenames from a specified image folder.
+ * If the folder contains a text file 'image_list.txt' the filenames are read from this file
+ * If there is no image list, the folder is searched for files with the supported extensions
+ * Unsupported extensions and empty files are discarded
  */
-DLL_PUBLIC void LoadImages(const string &image_folder, vector<string> *jpeg_names,
-                           ImgSetDescr *imgs);
-
-/**
- * Loads jpegs from a specified image folder. Assumes the folder contains
- * a file 'image_list.txt' that lists all the different images in the
- * folder
- */
-DLL_PUBLIC void LoadJPEGS(const string &image_folder, vector<string> *jpeg_names,
-                          ImgSetDescr *imgs);
-
-/**
- * Loads all jpegs from the list of image names. Assumes names contains
- * full path
- */
-DLL_PUBLIC void LoadJPEGS(const vector<string> &jpeg_names, ImgSetDescr *imgs);
+DLL_PUBLIC std::vector<std::string> ImageList(const std::string& image_folder,
+                                              const std::vector<std::string> &supported_extensions);
 
 /**
  * @brief Writes the input image as a ppm file
@@ -86,7 +74,7 @@ DLL_PUBLIC void WriteBatch(const TensorList<CPUBackend> &tl, const string &suffi
 template <typename T>
 int outHWCImage(const vector<T> &tmp, int h, int w, int c,
                 int i, int j, int k, float bias, float scale) {
-  return static_cast<int>(tmp[i*w*c + j*c + k]*scale + bias);
+  return static_cast<int>(static_cast<float>(tmp[i*w*c + j*c + k])*scale + bias);
 }
 
 template <typename T>
@@ -95,7 +83,7 @@ int outCHWImage(const vector<T> &tmp, int h, int w, int c,
   return static_cast<int>(tmp[k*h*w + i*w + j]*scale + bias);
 }
 
-typedef int (*outFunc)(const vector<double> &tmp, int h, int w, int c,
+typedef int (*outFunc)(const vector<uint8_t> &tmp, int h, int w, int c,
                        int i, int j, int k, float bias, float scale);
 
 /**
@@ -110,18 +98,10 @@ void WriteImageScaleBias(const T *img, int h, int w,
   DALI_ENFORCE(w >= 0);
   DALI_ENFORCE(c >= 0);
   CUDA_CALL(cudaDeviceSynchronize());
-  Tensor<GPUBackend> tmp_gpu, double_gpu;
-  tmp_gpu.Resize({h, w, c});
-  tmp_gpu.template mutable_data<T>();  // make sure the buffer is allocated
-  double_gpu.Resize({h, w, c});
 
-  // Copy the data and convert to double
-  MemCopy(tmp_gpu.template mutable_data<T>(), img, tmp_gpu.nbytes());
-  Convert(tmp_gpu.template data<T>(), tmp_gpu.size(), double_gpu.template mutable_data<double>());
-
-  vector<double> tmp(h * w * c, 0);
-  MemCopy(tmp.data(), double_gpu.template data<double>(), double_gpu.nbytes());
-  CUDA_CALL(cudaDeviceSynchronize());
+  vector<uint8_t> cpu_vector(h * w * c, 0);
+  MemCopy(cpu_vector.data(), img, cpu_vector.size(), 0);
+  CUDA_CALL(cudaStreamSynchronize(0));
   std::ofstream file(file_name + ".ppm");
   DALI_ENFORCE(file.is_open());
 
@@ -132,7 +112,7 @@ void WriteImageScaleBias(const T *img, int h, int w,
   for (int i = 0; i < h; ++i) {
     for (int j = 0; j < w; ++j) {
       for (int k = 0; k < c; ++k) {
-        file << (*pFunc)(tmp, h, w, c, i, j, k, bias, scale) << " ";
+        file << (*pFunc)(cpu_vector, h, w, c, i, j, k, bias, scale) << " ";
       }
     }
     file << endl;

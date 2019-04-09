@@ -15,6 +15,8 @@
 #ifndef  DALI_PIPELINE_DATA_VIEWS_H_
 #define  DALI_PIPELINE_DATA_VIEWS_H_
 
+#include <string>
+#include <vector>
 #include "dali/kernels/tensor_view.h"
 #include "dali/kernels/backend_tags.h"
 #include "dali/pipeline/data/tensor_list.h"
@@ -72,15 +74,18 @@ kernels::TensorShape<ndim> tensor_shape(const TensorList<Backend> &tl) {
   return out;
 }
 
+
 /// @brief Returns an equivalent tensor list shape for a tensor.
 ///        Outermost dimension is converted into sample index.
-template <int ndim, typename Backend>
+template<int ndim, typename Backend>
 kernels::TensorShape<ndim> tensor_shape(const Tensor<Backend> &tl) {
   const auto &tshape = tl.shape();
   kernels::TensorShape<ndim> out;
   int dim = tshape.size();
   if (ndim != kernels::DynamicDimensions) {
-    DALI_ENFORCE(dim == ndim, "Input has a wrong number of dimensions");
+    DALI_ENFORCE(dim == ndim,
+                 "Input has a wrong number of dimensions:"
+                 " (" + to_string(dim) + ") vs (" + to_string(ndim) + ")");
   } else {
     out.resize(dim);
   }
@@ -164,6 +169,18 @@ view_as_tensor(const TensorList<Backend> &data) {
     return {};
   using U = typename std::remove_const<T>::type;
   return { data.template data<U>(), tensor_shape<ndim>(data) };
+}
+
+template <int ndim>
+void to_dims_vec(std::vector<Dims> &dims_vec, const kernels::TensorListShape<ndim> &tls) {
+  const int dim = tls.sample_dim();
+  const int N = tls.num_samples();
+  dims_vec.resize(N);
+  for (int i = 0; i < N; i++) {
+    dims_vec[i].resize(dim);
+    for (int j = 0; j < dim; j++)
+      dims_vec[i][j] = tls.tensor_shape_span(i)[j];
+  }
 }
 
 }  // namespace dali

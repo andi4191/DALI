@@ -2,11 +2,13 @@
 #ifndef DALI_TEST_DALI_TEST_MATCHING_H_
 #define DALI_TEST_DALI_TEST_MATCHING_H_
 
-#include "dali/test/dali_test_single_op.h"
+#include <memory>
+#include <string>
 #include <utility>
 #include <vector>
-#include <string>
-#include <memory>
+
+#include "dali/common.h"
+#include "dali/test/dali_test_single_op.h"
 
 namespace dali {
 
@@ -34,7 +36,7 @@ class GenericMatchingTest : public DALISingleOpTest<ImgType, OutputImgType> {
       OpSpec("HostDecoder")
         .AddArg("output_type", this->ImageType())
         .AddInput("jpegs", "cpu")
-        .AddOutput("input", "cpu"));
+        .AddOutput("input", "cpu"), "HostDecoder");
 
     // Launching the same transformation on CPU (outputIdx 0) and GPU (outputIdx 1)
     this->AddOperatorWithOutput(descr);
@@ -43,7 +45,7 @@ class GenericMatchingTest : public DALISingleOpTest<ImgType, OutputImgType> {
 
   vector<TensorList<CPUBackend>*>
   Reference(const vector<TensorList<CPUBackend>*> &inputs, DeviceWorkspace *ws) override {
-    if (OpType() == DALI_GPU)
+    if (GetOpType() == OpType::GPU)
       return this->CopyToHost(ws->Output<GPUBackend>(1));
     else
       return this->CopyToHost(ws->Output<CPUBackend>(1));
@@ -70,11 +72,11 @@ class GenericMatchingTest : public DALISingleOpTest<ImgType, OutputImgType> {
     }
   }
 
-  inline DALIOpType OpType() const                { return m_nOpType; }
-  inline void setOpType(DALIOpType opType)        { m_nOpType = opType; }
+  inline OpType GetOpType() const                { return op_type_; }
+  inline void SetOpType(OpType opType)        { op_type_ = opType; }
 
 
-  DALIOpType m_nOpType = DALI_GPU;
+  OpType op_type_ = OpType::GPU;
 };
 
 }  // namespace dali

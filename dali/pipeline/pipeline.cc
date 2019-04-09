@@ -21,12 +21,14 @@
 #include <functional>
 #include <memory>
 
-#include "dali/pipeline/executor/pipelined_executor.h"
 #include "dali/pipeline/executor/async_pipelined_executor.h"
+#include "dali/pipeline/executor/async_separated_pipelined_executor.h"
+#include "dali/pipeline/executor/executor_factory.h"
+#include "dali/pipeline/executor/pipelined_executor.h"
 
 #include "dali/pipeline/operators/argument.h"
 #include "dali/pipeline/operators/common.h"
-#include "dali/pipeline/util/device_guard.h"
+#include "dali/util/device_guard.h"
 #include "dali/pipeline/dali.pb.h"
 
 namespace dali {
@@ -96,11 +98,13 @@ namespace dali {
     Init(this->batch_size_, this->num_threads_,
          this->device_id_, def.seed(),
          pipelined_execution,
+         separated_execution_,  // We use false as default for now
          async_execution,
          bytes_per_sample_hint,
          set_affinity,
          max_num_stream,
-         prefetch_queue_depth);
+         default_cuda_stream_priority,
+         QueueSizes{prefetch_queue_depth});
 
     // from serialized pipeline, construct new pipeline
     // All external inputs
@@ -120,9 +124,27 @@ namespace dali {
     }
   }
 
+static bool has_prefix(const std::string &operator_name, const std::string& prefix) {
+  if (operator_name.size() < prefix.size()) return false;
+  return std::equal(operator_name.begin(), operator_name.begin() + prefix.size(),
+                    prefix.begin());
+}
+
 void Pipeline::AddOperator(OpSpec spec, const std::string& inst_name) {
   DALI_ENFORCE(!built_, "Alterations to the pipeline after "
       "\"Build()\" has been called are not allowed");
+
+  // If necessary, split nvJPEGDecoder operator in two separated stages (CPU and Mixed-GPU)
+#ifdef NVJPEG_DECOUPLED_API
+  auto operator_name = spec.name();
+  if (has_prefix(operator_name, "nvJPEGDecoder") &&
+      operator_name.find("CPUStage") == std::string::npos &&
+      operator_name.find("GPUStage") == std::string::npos &&
+      spec.GetArgument<bool>("split_stages")) {
+    AddSplitNvJPEGDecoder(spec, inst_name);
+    return;
+  }
+#endif
 
   // Validate op device
   string device = spec.GetArgument<string>("device");
@@ -245,6 +267,38 @@ void Pipeline::AddOperator(OpSpec spec, const std::string& inst_name) {
   this->op_specs_to_serialize_.push_back(true);
 }
 
+inline void Pipeline::AddSplitNvJPEGDecoder(OpSpec &spec, const std::string& inst_name) {
+  std::string operator_name = spec.name();
+  std::string prefix = "nvJPEGDecoder";
+  DALI_ENFORCE(has_prefix(operator_name, prefix));
+  auto suffix = operator_name.substr(prefix.size());
+
+  std::string cpu_stage_name = "nvJPEGDecoderCPUStage" + suffix;
+  spec.set_name(cpu_stage_name);
+  spec.SetArg("device", "cpu");
+
+  auto& op_output = spec.MutableOutput(0);
+  string op_output_name = op_output.first;
+
+  const std::string mangled_outputname(cpu_stage_name + inst_name);
+  op_output.first = mangled_outputname + "0";
+  op_output.second = "cpu";
+  spec.AddOutput(mangled_outputname + "1", "cpu");
+  spec.AddOutput(mangled_outputname + "2", "cpu");
+
+  OpSpec gpu_spec = OpSpec("nvJPEGDecoderGPUStage")
+    .ShareArguments(spec)
+    .AddInput(spec.OutputName(0), "cpu")
+    .AddInput(spec.OutputName(1), "cpu")
+    .AddInput(spec.OutputName(2), "cpu")
+    .AddOutput(op_output_name, "gpu");
+  gpu_spec.SetArg("device", "mixed");
+
+  // TODO(spanev): handle serialization for nvJPEGDecoderNew
+  this->AddOperator(spec, inst_name);
+  this->AddOperator(gpu_spec, inst_name + "_gpu");
+}
+
 inline int GetMemoryHint(OpSpec &spec, int index) {
   if (!spec.HasArgument("bytes_per_sample_hint"))
     return 0;
@@ -272,9 +326,9 @@ void Pipeline::PropagateMemoryHint(OpNode &node) {
   assert(node.parents.size() == 1);
   for (int inp_idx = 0; inp_idx < node.spec.NumRegularInput(); inp_idx++) {
     auto input_name = node.spec.Input(inp_idx);
-    NodeID parent_node_id = graph_.TensorSourceID(input_name);
+    OpNodeId parent_node_id = graph_.TensorSourceID(input_name);
     int idx = graph_.TensorIdxInSource(input_name);
-    auto &src = graph_.node(parent_node_id);
+    auto &src = graph_.Node(parent_node_id);
     int hint = GetMemoryHint(src.spec, idx);
     if (hint) {
       // inp_idx == out_idx for MakeContiguous
@@ -289,26 +343,10 @@ void Pipeline::Build(vector<std::pair<string, string>> output_names) {
   DALI_ENFORCE(!built_, "\"Build()\" can only be called once.");
   DALI_ENFORCE(output_names.size() > 0, "User specified zero outputs.");
 
-  // Creating the executor
-  if (pipelined_execution_ && async_execution_) {
-    executor_.reset(new AsyncPipelinedExecutor(
-            batch_size_, num_threads_,
-            device_id_, bytes_per_sample_hint_,
-            set_affinity_, max_num_stream_, prefetch_queue_depth_));
-    executor_->Init();
-  } else if (pipelined_execution_) {
-    executor_.reset(new PipelinedExecutor(
-            batch_size_, num_threads_,
-            device_id_, bytes_per_sample_hint_,
-            set_affinity_, max_num_stream_, prefetch_queue_depth_));
-  } else if (async_execution_) {
-    DALI_FAIL("Not implemented.");
-  } else {
-    executor_.reset(new Executor(
-            batch_size_, num_threads_,
-            device_id_, bytes_per_sample_hint_,
-            set_affinity_, max_num_stream_, prefetch_queue_depth_));
-  }
+  executor_ = GetExecutor(pipelined_execution_, separated_execution_, async_execution_, batch_size_,
+                          num_threads_, device_id_, bytes_per_sample_hint_, set_affinity_,
+                          max_num_stream_, default_cuda_stream_priority_, prefetch_queue_depth_);
+  executor_->Init();
 
   // Creating the graph
   for (auto& name_op_spec : op_specs_) {
@@ -374,8 +412,8 @@ void Pipeline::Build(vector<std::pair<string, string>> output_names) {
     }
   }
 
-  for (int i = 0; i < graph_.NumMixedOp(); i++) {
-    OpNode &node = graph_.mixed_node(i);
+  for (int i = 0; i < graph_.NumOp(OpType::MIXED); i++) {
+    OpNode &node = graph_.Node(OpType::MIXED, i);
     if (node.spec.name() == "MakeContiguous") {
       PropagateMemoryHint(node);
     }
@@ -392,21 +430,20 @@ void Pipeline::SetOutputNames(vector<std::pair<string, string>> output_names) {
   output_names_ = output_names;
 }
 
-
 void Pipeline::RunCPU() {
   DALI_ENFORCE(built_,
       "\"Build()\" must be called prior to executing the pipeline.");
   executor_->RunCPU();
-  executor_->RunMixed();
 }
 
 void Pipeline::RunGPU() {
   DALI_ENFORCE(built_,
       "\"Build()\" must be called prior to executing the pipeline.");
+  executor_->RunMixed();
   executor_->RunGPU();
 }
 
-void Pipeline::SetCompletionCallback(Executor::ExecutorCallback cb) {
+void Pipeline::SetCompletionCallback(ExecutorBase::ExecutorCallback cb) {
   executor_->SetCompletionCallback(cb);
 }
 
@@ -466,11 +503,11 @@ void Pipeline::SetupCPUInput(std::map<string, EdgeMeta>::iterator it,
   }
 
   // Update the OpSpec to use the contiguous input
-  auto input_strs = spec->mutable_input(input_idx);
-  DALI_ENFORCE(input_strs->first == it->first, "Input at index " +
+  auto& input_strs = spec->MutableInput(input_idx);
+  DALI_ENFORCE(input_strs.first == it->first, "Input at index " +
       std::to_string(input_idx) + " does not match input iterator "
-      "name (" + input_strs->first + " v. " + it->first + ").");
-  input_strs->first = "contiguous_" + input_strs->first;
+      "name (" + input_strs.first + " v. " + it->first + ").");
+  input_strs.first = "contiguous_" + input_strs.first;
 }
 
 void Pipeline::SetupGPUInput(std::map<string, EdgeMeta>::iterator it) {
@@ -490,6 +527,11 @@ void Pipeline::PrepareOpSpec(OpSpec *spec) {
     .AddArg("num_threads", num_threads_)
     .AddArg("device_id", device_id_)
     .AddArgIfNotExisting("seed", seed_[current_seed_]);
+  string dev = spec->GetArgument<string>("device");
+  if (dev == "cpu" || dev == "mixed")
+    spec->AddArg("cpu_prefetch_queue_depth", prefetch_queue_depth_.cpu_size);
+  if (dev == "gpu" || dev == "mixed")
+    spec->AddArg("gpu_prefetch_queue_depth", prefetch_queue_depth_.gpu_size);
   current_seed_ = (current_seed_+1) % MAX_SEEDS;
 }
 
@@ -582,20 +624,20 @@ string Pipeline::SerializeToProtobuf() const {
 }
 
 OpNode * Pipeline::GetOperatorNode(const std::string& name) {
-  return &(graph_.node(name));
+  return &(graph_.Node(name));
 }
 
 std::map<std::string, Index> Pipeline::EpochSize() {
   std::map<std::string, Index> ret;
-  for (Index i = 0; i < graph_.NumCPUOp(); ++i) {
-    const OpNode& current = graph_.cpu_node(i);
+  for (Index i = 0; i < graph_.NumOp(OpType::CPU); ++i) {
+    const OpNode &current = graph_.Node(OpType::CPU, i);
     Index epoch_size = current.op->epoch_size();
     if (epoch_size != -1) {
       ret.insert(make_pair(current.instance_name, epoch_size));
     }
   }
-  for (Index i = 0; i < graph_.NumGPUOp(); ++i) {
-    const OpNode& current = graph_.gpu_node(i);
+  for (Index i = 0; i < graph_.NumOp(OpType::GPU); ++i) {
+    const OpNode &current = graph_.Node(OpType::GPU, i);
     Index epoch_size = current.op->epoch_size();
     if (epoch_size != -1) {
       ret.insert(make_pair(current.instance_name, epoch_size));

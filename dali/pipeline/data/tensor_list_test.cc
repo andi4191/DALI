@@ -64,7 +64,7 @@ class TensorListTest : public DALITest {
     Index offset = 0;
     for (auto &tmp : shape) {
       offsets->push_back(offset);
-      offset += Product(tmp);
+      offset += volume(tmp);
     }
 
     // Resize the buffer
@@ -82,7 +82,7 @@ class TensorListTest : public DALITest {
 
 typedef ::testing::Types<CPUBackend,
                          GPUBackend> Backends;
-TYPED_TEST_CASE(TensorListTest, Backends);
+TYPED_TEST_SUITE(TensorListTest, Backends);
 
 // Note: A TensorList in a valid state has a type. To get to a valid state, we
 // can aquire our type relative to the allocation and the size of the buffer
@@ -115,7 +115,7 @@ TYPED_TEST(TensorListTest, TestGetTypeSizeBytes) {
   Index size = 0;
   for (auto &tmp : shape) {
     offsets.push_back(size);
-    size += Product(tmp);
+    size += volume(tmp);
   }
 
   // Validate the internals
@@ -142,7 +142,7 @@ TYPED_TEST(TensorListTest, TestGetSizeTypeBytes) {
   Index size = 0;
   for (auto& tmp : shape) {
     offsets.push_back(size);
-    size += Product(tmp);
+    size += volume(tmp);
   }
 
   // Verify the internals
@@ -183,7 +183,7 @@ TYPED_TEST(TensorListTest, TestGetBytesThenNoAlloc) {
   Index size = 0;
   for (auto &tmp : shape) {
     offsets.push_back(size);
-    size += Product(tmp);
+    size += volume(tmp);
   }
 
   // Verify the internals
@@ -228,7 +228,7 @@ TYPED_TEST(TensorListTest, TestGetBytesThenAlloc) {
   Index size = 0;
   for (auto &tmp : shape) {
     offsets.push_back(size);
-    size += Product(tmp);
+    size += volume(tmp);
   }
 
   // Verify the internals
@@ -332,7 +332,7 @@ TYPED_TEST(TensorListTest, TestMultipleResize) {
     Index offset = 0;
     for (auto &tmp : shape) {
       offsets.push_back(offset);
-      offset += Product(tmp);
+      offset += volume(tmp);
     }
   }
 
@@ -347,6 +347,38 @@ TYPED_TEST(TensorListTest, TestMultipleResize) {
     ASSERT_EQ(tensor_list.tensor_shape(i), shape[i]);
     ASSERT_EQ(tensor_list.tensor_offset(i), offsets[i]);
   }
+}
+TYPED_TEST(TensorListTest, TestCopy) {
+  TensorList<TypeParam> tl;
+
+  tl.template mutable_data<float>();
+
+  auto shape = this->GetRandShape();
+  tl.Resize(shape);
+
+  TensorList<TypeParam> tl2;
+  tl2.Copy(tl, 0);
+
+  ASSERT_EQ(tl.ntensor(), tl2.ntensor());
+  ASSERT_EQ(tl.type(), tl2.type());
+  ASSERT_EQ(tl.size(), tl2.size());
+
+  for (size_t i = 0; i < shape.size(); ++i) {
+    ASSERT_EQ(tl.tensor_shape(i), tl.tensor_shape(i));
+    ASSERT_EQ(volume(tl.tensor_shape(i)), volume(tl2.tensor_shape(i)));
+  }
+}
+
+TYPED_TEST(TensorListTest, TestCopyEmpty) {
+  TensorList<TypeParam> tl;
+
+  tl.template mutable_data<float>();
+
+  TensorList<TypeParam> tl2;
+  tl2.Copy(tl, 0);
+  ASSERT_EQ(tl.ntensor(), tl2.ntensor());
+  ASSERT_EQ(tl.type(), tl2.type());
+  ASSERT_EQ(tl.size(), tl2.size());
 }
 
 TYPED_TEST(TensorListTest, TestTypeChangeSameSize) {

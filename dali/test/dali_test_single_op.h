@@ -15,15 +15,12 @@
 #ifndef DALI_TEST_DALI_TEST_SINGLE_OP_H_
 #define DALI_TEST_DALI_TEST_SINGLE_OP_H_
 
-#include "dali/test/dali_test.h"
-
 #include <gtest/gtest.h>
-
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
-
+#include "dali/test/dali_test.h"
 #include "dali/pipeline/pipeline.h"
 
 namespace dali {
@@ -34,8 +31,12 @@ namespace dali {
                                            // Use "" to make the output in stdout
 #endif
 
+#define SAVE_TMP_IMAGES 0
+
 namespace images {
 
+// TODO(janton): DALI-582 Using this order, breaks some tests
+// ImageList(image_folder, {".jpg"})
 const vector<string> jpeg_test_images = {
   image_folder + "/420.jpg",
   image_folder + "/422.jpg",
@@ -50,25 +51,8 @@ const vector<string> jpeg_test_images = {
   image_folder + "/422-odd-width.jpg"
 };
 
-const vector<string> png_test_images = {
-  image_folder + "/png/000000000139.png",
-  image_folder + "/png/000000000285.png",
-  image_folder + "/png/000000000632.png",
-  image_folder + "/png/000000000724.png",
-  image_folder + "/png/000000000776.png",
-  image_folder + "/png/000000000785.png",
-  image_folder + "/png/000000000802.png",
-  image_folder + "/png/000000000872.png",
-  image_folder + "/png/000000000885.png",
-  image_folder + "/png/000000001000.png",
-  image_folder + "/png/000000001268.png"
-};
-
-const std::vector<std::string> tiff_test_images = {
-        image_folder + "/tiff/420.tiff",
-        image_folder + "/tiff/422.tiff",
-        image_folder + "/tiff/notif.tif",
-};
+const vector<string> png_test_images = ImageList(image_folder + "/png", {".png"});
+const vector<string> tiff_test_images = ImageList(image_folder + "/tiff", {".tiff", ".tif"});
 
 }  // namespace images
 
@@ -99,7 +83,7 @@ typedef enum {
 
 typedef struct {
   const char *m_Name;
-  const char *m_val;
+  std::string m_val;
   const DALIDataType type;
 } OpArg;
 
@@ -174,7 +158,7 @@ class DALISingleOpTest : public DALITest {
     const auto flags = GetImageLoadingFlags();
 
     if (flags & t_loadJPEGs) {
-      LoadJPEGS(images::jpeg_test_images, &jpegs_);
+      LoadImages(images::jpeg_test_images, &jpegs_);
       if (flags & t_decodeJPEGs)
         DecodeImages(img_type_, jpegs_, &jpeg_decoded_, &jpeg_dims_);
     }
@@ -230,7 +214,7 @@ class DALISingleOpTest : public DALITest {
     for (int i = 0; i < spec.NumOutput(); ++i)
       outputs_.push_back(std::make_pair(spec.OutputName(i), spec.OutputDevice(i)));
 
-    pipeline_->AddOperator(spec);
+    pipeline_->AddOperator(spec, spec.name());
   }
 
   virtual void AddDefaultArgs(OpSpec& spec) {
@@ -291,11 +275,12 @@ class DALISingleOpTest : public DALITest {
     for (size_t i = 0; i < output_indices.size(); ++i) {
       auto output_device = outputs_[i].second;
 
+      auto idx = output_indices[i];
       if (output_device == "gpu") {
         // copy to host
-        calc_output->Copy(ws->Output<GPUBackend>(output_indices[i]), nullptr);
+        calc_output->Copy(ws->Output<GPUBackend>(idx), nullptr);
       } else {
-        calc_output->Copy(ws->Output<CPUBackend>(output_indices[i]), nullptr);
+        calc_output->Copy(ws->Output<CPUBackend>(idx), nullptr);
       }
 
       auto ref_output = res[i];
@@ -305,8 +290,9 @@ class DALISingleOpTest : public DALITest {
       CheckTensorLists(calc_output.get(), ref_output);
     }
 
-    for (auto *ref_output : res) {
+    for (auto *&ref_output : res) {
       delete ref_output;
+      ref_output = nullptr;
     }
   }
 
@@ -384,14 +370,14 @@ class DALISingleOpTest : public DALITest {
       return *spec;
 
     for (auto param : *args) {
-      auto val = param.m_val;
-      auto name = param.m_Name;
+      const auto &val = param.m_val;
+      const auto &name = param.m_Name;
       switch (param.type) {
         case DALI_INT32:
-          spec->AddArg(name, strtol(val, nullptr, 10));
+          spec->AddArg(name, strtol(val.c_str(), nullptr, 10));
           break;
         case DALI_FLOAT:
-          spec->AddArg(name, strtof(val, nullptr));
+          spec->AddArg(name, strtof(val.c_str(), nullptr));
           break;
         case DALI_STRING:
           spec->AddArg(name, val);
@@ -403,10 +389,10 @@ class DALISingleOpTest : public DALITest {
           break;
         }
         case DALI_FLOAT_VEC:
-          StringToVector<float>(name, val, spec, param.type);
+          StringToVector<float>(name, val.c_str(), spec, param.type);
           break;
         case DALI_INT_VEC:
-          StringToVector<int>(name, val, spec, param.type);
+          StringToVector<int>(name, val.c_str(), spec, param.type);
           break;
         default: DALI_FAIL("Unknown type of parameters \"" + std::string(val) + "\" "
                            "used for \"" + std::string(name) + "\"");
@@ -457,7 +443,23 @@ class DALISingleOpTest : public DALITest {
 
   template <typename T>
   int CheckBuffers(int lenRaster, const T *img1, const T *img2, bool checkAll,
-                   double *pMean = nullptr, const vector<Index> *shape = nullptr) const {
+                   double *pMean = nullptr, vector<Index> shape = {}) const {
+#if SAVE_TMP_IMAGES
+  if (!shape.empty()) {
+    static int i = 0;
+    int H = shape[0];
+    int W = shape[1];
+    int C = shape[2];
+    const int input_channel_flag = GetOpenCvChannelType(C);
+    const cv::Mat cv_img1 = CreateMatFromPtr(H, W, input_channel_flag, img1);
+    const cv::Mat cv_img2 = CreateMatFromPtr(H, W, input_channel_flag, img2);
+    std::cout << "Saving images #" << std::to_string(i) << std::endl;
+    cv::imwrite("tmp_img_" + std::to_string(i) + "_A.png", cv_img1);
+    cv::imwrite("tmp_img_" + std::to_string(i) + "_B.png", cv_img2);
+    i++;
+  }
+#endif
+
 #ifdef PIXEL_STAT_FILE
     static int imgNumb;
     FILE *file = strlen(PIXEL_STAT_FILE)? fopen(PIXEL_STAT_FILE".txt", imgNumb? "a" : "w") : NULL;
@@ -489,14 +491,14 @@ class DALISingleOpTest : public DALITest {
 
     const int length = lenRaster / jMax;
 
-    const int checkBest = shape? 1 : 0;
+    const bool checkBest = TestCheckType(t_checkBestMatch);
 
     int shiftHorFrom, shiftHorTo, shiftVertFrom, shiftVertTo;
     shiftHorFrom = shiftVertFrom = -checkBest;
     shiftHorTo = shiftVertTo = checkBest;
 
-    const auto H = checkBest? (*shape)[0] : 0;
-    const auto W = checkBest? (*shape)[1] : 0;
+    const auto H = checkBest ? shape[0] : 0;
+    const auto W = checkBest ? shape[1] : 0;
     int retValBest = -1;
     double bestMean = 100.;
 
@@ -652,7 +654,7 @@ class DALISingleOpTest : public DALITest {
   }
 
   void ReportTestFailure(double mean, int colorIdx, int idx = -1,
-                         const vector<Index> *pShape = nullptr) const {
+                         vector<Index> shape = {}) const {
     if (TestCheckType(t_checkNoAssert))
       cout << "\nTest warning:";
     else
@@ -664,8 +666,8 @@ class DALISingleOpTest : public DALITest {
     if (idx >= 0)
       cout << " element # " << idx;
 
-    if (pShape)
-      cout << " (h, w) = (" << (*pShape)[0] << ", " << (*pShape)[1] << ")";
+    if (!shape.empty())
+      cout << " (h, w) = (" << shape[0] << ", " << shape[1] << ")";
 
     cout << " mean = " << mean << " and it was expected to be <= " << eps_ << endl;
   }
@@ -688,10 +690,9 @@ class DALISingleOpTest : public DALITest {
 
     int failNumb = 0, colorIdx = 0;
     const bool checkAll = TestCheckType(t_checkAll);
+    const bool checkElements = TestCheckType(t_checkElements);
     double mean;
-    if (TestCheckType(t_checkElements)) {
-      // Checking for best match could be done only when images are compared separately
-      const bool checkBestMatch = TestCheckType(t_checkBestMatch);
+    if (checkElements) {
       // The the results are checked for each element separately
       for (size_t i = 0; i < t1->ntensor(); ++i) {
         const auto shape1 = t1->tensor_shape(i);
@@ -706,16 +707,16 @@ class DALISingleOpTest : public DALITest {
         if (floatType) {
           colorIdx = CheckBuffers<float>(lenBuffer,
                           (*t1).template tensor<float>(i), (*t2).template tensor<float>(i),
-                          checkAll, &mean, checkBestMatch? &shape1 : nullptr);
+                          checkAll, &mean, shape1);
         } else {
           colorIdx = CheckBuffers<unsigned char>(lenBuffer,
                           (*t1).template tensor<uint8>(i), (*t2).template tensor<uint8>(i),
-                          checkAll, &mean, checkBestMatch? &shape1 : nullptr);
+                          checkAll, &mean, shape1);
         }
 
         if (colorIdx >= 0) {
           // Test failed for colorIdx
-          ReportTestFailure(mean, colorIdx, i, &shape1);
+          ReportTestFailure(mean, colorIdx, i, shape1);
           failNumb++;
           if (!checkAll)
             break;

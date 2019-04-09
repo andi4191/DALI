@@ -1,5 +1,7 @@
 #!/bin/bash -ex
 
+source ../setup_test.sh
+
 BINNAME=dali_test.bin
 
 for DIRNAME in \

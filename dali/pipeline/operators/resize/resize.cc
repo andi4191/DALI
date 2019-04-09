@@ -13,17 +13,13 @@
 // limitations under the License.
 
 #include "dali/pipeline/operators/resize/resize.h"
-#include <opencv2/opencv.hpp>
-#include "dali/util/ocv.h"
+#include "dali/pipeline/data/views.h"
 
 namespace dali {
 
 DALI_SCHEMA(ResizeAttr)
   .AddOptionalArg("image_type",
         R"code(The color space of input and output image.)code", DALI_RGB)
-  .AddOptionalArg("interp_type",
-      R"code(Type of interpolation used.)code",
-      DALI_INTERP_LINEAR)
   .AddOptionalArg("resize_x", "The length of the X dimension of the resized image. "
       "This option is mutually exclusive with `resize_shorter`. "
       "If the `resize_y` is left at 0, then the op will keep "
@@ -50,81 +46,54 @@ DALI_SCHEMA(Resize)
   .AllowMultipleInputSets()
   .AddOptionalArg("save_attrs",
       R"code(Save reshape attributes for testing.)code", false)
-  .AddParent("ResizeAttr");
-
-void ResizeAttr::SetSize(DALISize *in_size, const vector<Index> &shape, int idx,
-                         DALISize *out_size, TransformMeta const *meta) const {
-  in_size->height = shape[0];
-  in_size->width = shape[1];
-
-  if (!meta)
-    meta = per_sample_meta_.data();
-
-  out_size->height = meta[idx].rsz_h;
-  out_size->width = meta[idx].rsz_w;
-}
-
-void ResizeAttr::DefineCrop(DALISize *out_size, int *pCropX, int *pCropY, int idx) const {
-  *pCropX = per_sample_meta_[idx].crop.second;
-  *pCropY = per_sample_meta_[idx].crop.first;
-  out_size->height = crop_height_[idx];
-  out_size->width  = crop_width_[idx];
-}
+  .AddParent("ResizeAttr")
+  .AddParent("ResamplingFilterAttr");
 
 template<>
-Resize<CPUBackend>::Resize(const OpSpec &spec) : Operator<CPUBackend>(spec), ResizeAttr(spec) {
+Resize<CPUBackend>::Resize(const OpSpec &spec)
+    : Operator<CPUBackend>(spec)
+    , ResizeAttr(spec)
+    , ResizeBase(spec) {
   per_sample_meta_.resize(num_threads_);
+  resample_params_.resize(num_threads_);
+  out_shape_.resize(num_threads_);
+  Initialize(num_threads_);
+
   save_attrs_ = spec_.HasArgument("save_attrs");
   outputs_per_idx_ = save_attrs_ ? 2 : 1;
-
-// Checking the value of interp_type_
-  int ocv_interp_type;
-  DALI_ENFORCE(OCVInterpForDALIInterp(interp_type_, &ocv_interp_type) == DALISuccess,
-               "Unknown interpolation type");
 }
 
 template <>
 void Resize<CPUBackend>::SetupSharedSampleParams(SampleWorkspace *ws) {
-  per_sample_meta_[ws->thread_idx()] = GetTransfomMeta(ws, spec_);
+  const int thread_idx = ws->thread_idx();
+  per_sample_meta_[thread_idx] = GetTransfomMeta(ws, spec_);
+  resample_params_[thread_idx] = GetResamplingParams(per_sample_meta_[thread_idx]);
 }
 
 template <>
 void Resize<CPUBackend>::RunImpl(SampleWorkspace *ws, const int idx) {
+  const int thread_idx = ws->thread_idx();
   const auto &input = ws->Input<CPUBackend>(idx);
-  DALI_ENFORCE(input.ndim() == 3, "Operator expects 3-dimensional image input.");
   auto &output = ws->Output<CPUBackend>(outputs_per_idx_ * idx);
-  const auto &input_shape = input.shape();
 
-  CheckParam(input, "Resize<CPUBackend>");
+  DALI_ENFORCE(IsType<uint8>(input.type()), "Expected input data as uint8.");
+  DALI_ENFORCE(input.ndim() == 3, "Resize expects 3-dimensional tensor input.");
+  if (input.GetLayout() != DALI_UNKNOWN) {
+    DALI_ENFORCE(input.GetLayout() == DALI_NHWC,
+                 "Resize expects interleaved channel layout (NHWC)");
+  }
 
-  const TransformMeta &meta = per_sample_meta_[ws->thread_idx()];
+  RunCPU(output, input, thread_idx);
 
-  // Resize the output & run
-  output.Resize({meta.rsz_h, meta.rsz_w, meta.C});
-
-  auto pImgInp = input.template data<uint8>();
-  auto pImgOut = output.template mutable_data<uint8>();
-
-  const auto H = input_shape[0];
-  const auto W = input_shape[1];
-  const auto C = input_shape[2];
-
-  const auto cvImgType = C == 3? CV_8UC3 : CV_8UC1;
-  cv::Mat inputMat(H, W, cvImgType, const_cast<unsigned char*>(pImgInp));
-
-  // perform the resize
-  cv::Mat rsz_img(meta.rsz_h, meta.rsz_w, cvImgType, const_cast<unsigned char*>(pImgOut));
-  int ocv_interp_type;
-  OCVInterpForDALIInterp(interp_type_, &ocv_interp_type);
-  cv::resize(inputMat, rsz_img, cv::Size(meta.rsz_w, meta.rsz_h), 0, 0, ocv_interp_type);
   if (save_attrs_) {
-      auto &attr_output = ws->Output<CPUBackend>(outputs_per_idx_ * idx + 1);
+    auto &attr_output = ws->Output<CPUBackend>(outputs_per_idx_ * idx + 1);
+    auto &in_shape = input.shape();
 
-      attr_output.Resize(Dims{2});
-      int *t = attr_output.mutable_data<int>();
-      t[0] = meta.H;
-      t[1] = meta.W;
-    }
+    attr_output.Resize(Dims{2});
+    int *t = attr_output.mutable_data<int>();
+    t[0] = in_shape[0];
+    t[1] = in_shape[1];
+  }
 }
 
 DALI_REGISTER_OPERATOR(Resize, Resize<CPUBackend>, CPU);

@@ -23,25 +23,25 @@
 #include "dali/pipeline/operators/operator.h"
 #include "dali/pipeline/operators/op_spec.h"
 #include "dali/pipeline/operators/common.h"
+#include "dali/pipeline/operators/resize/resize_base.h"
+#include "dali/pipeline/operators/crop/random_crop_attr.h"
+#include "dali/kernels/imgproc/resample/params.h"
 
 namespace dali {
 
 template <typename Backend>
-class RandomResizedCrop : public Operator<Backend> {
+class RandomResizedCrop : public Operator<Backend>
+                        , protected ResizeBase
+                        , protected RandomCropAttr {
  public:
-  explicit inline RandomResizedCrop(const OpSpec &spec) :
-    Operator<Backend>(spec),
-    params_(new Params()),
-    num_attempts_(spec.GetArgument<int>("num_attempts")),
-    interp_type_(spec.GetArgument<DALIInterpType>("interp_type")) {
+  explicit inline RandomResizedCrop(const OpSpec &spec)
+      : Operator<Backend>(spec)
+      , ResizeBase(spec)
+      , RandomCropAttr(spec)
+      , interp_type_(spec.GetArgument<DALIInterpType>("interp_type")) {
     GetSingleOrRepeatedArg(spec, &size_, "size", 2);
-    GetSingleOrRepeatedArg(spec, &aspect_ratios_, "random_aspect_ratio", 2);
-    GetSingleOrRepeatedArg(spec, &area_, "random_area", 2);
-    DALI_ENFORCE(aspect_ratios_[0] <= aspect_ratios_[1],
-        "Provided empty range");
-    DALI_ENFORCE(area_[0] <= area_[1],
-        "Provided empty range");
     InitParams(spec);
+    BackendInit();
   }
 
   inline ~RandomResizedCrop() override = default;
@@ -55,58 +55,35 @@ class RandomResizedCrop : public Operator<Backend> {
   void SetupSharedSampleParams(Workspace<Backend> *ws) override;
 
  private:
-  struct CropInfo {
-    int x, y;
-    int w, h;
-  };
+  void BackendInit();
 
-  void InitParams(const OpSpec &spec);
-
-  bool TryCrop(int H, int W,
-               std::uniform_real_distribution<float> *ratio_dis,
-               std::uniform_real_distribution<float> *area_dis,
-               std::uniform_real_distribution<float> *uniform,
-               std::mt19937 *gen,
-               CropInfo * crop) {
-      float scale  = (*area_dis)(*gen);
-      float ratio  = (*ratio_dis)(*gen);
-      float swap   = (*uniform)(*gen);
-
-      size_t original_area = H * W;
-      float target_area = scale * original_area;
-
-      int w = static_cast<int>(round(sqrtf(target_area * ratio)));
-      int h = static_cast<int>(round(sqrtf(target_area / ratio)));
-
-      if (swap < 0.5f) {
-        std::swap(w, h);
-      }
-
-      if (w <= W && h <= H) {
-        float rand_x = (*uniform)(*gen);
-        float rand_y = (*uniform)(*gen);
-
-        crop->w = w;
-        crop->h = h;
-        crop->x = static_cast<int>(rand_x * (W - w));
-        crop->y = static_cast<int>(rand_y * (H - h));
-        return true;
-      } else {
-        return false;
-      }
+  void CalcResamplingParams() {
+    const int n = crops_.size();
+    resample_params_.resize(n);
+    for (int i = 0; i < n; i++)
+      resample_params_[i] = CalcResamplingParams(i);
   }
 
-  // To be filled by actual implementations
-  struct Params {};
+  kernels::ResamplingParams2D CalcResamplingParams(int index) const {
+    auto &wnd = crops_[index];
+    auto params = shared_params_;
+    params[0].roi = kernels::ResamplingParams::ROI(wnd.y, wnd.y+wnd.h);
+    params[1].roi = kernels::ResamplingParams::ROI(wnd.x, wnd.x+wnd.w);
+    return params;
+  }
 
-  unique_ptr<Params> params_;
+  void InitParams(const OpSpec &spec) {
+    crops_.resize(batch_size_);
+    shared_params_[0].output_size = size_[0];
+    shared_params_[1].output_size = size_[1];
+    shared_params_[0].min_filter = shared_params_[1].min_filter = min_filter_;
+    shared_params_[0].mag_filter = shared_params_[1].mag_filter = mag_filter_;
+  }
 
   std::vector<int> size_;
-  int num_attempts_;
   DALIInterpType interp_type_;
-
-  std::vector<float> aspect_ratios_;
-  std::vector<float> area_;
+  kernels::ResamplingParams2D shared_params_;
+  std::vector<CropWindow> crops_;
 };
 
 }  // namespace dali

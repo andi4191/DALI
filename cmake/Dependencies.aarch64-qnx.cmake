@@ -4,7 +4,7 @@
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
     
-find_package(CUDA 10.0 EXACT)
+find_package(CUDA 10.0 REQUIRED)
     
 set(CUDA_TOOLKIT_ROOT_DIR ${CUDA_HOST})
 set(CUDA_TOOLKIT_TARGET_DIR ${CUDA_TARGET})
@@ -52,6 +52,21 @@ if (BUILD_NVTX)
   find_cuda_helper_libs(nvToolsExt)
   list(APPEND DALI_LIBS ${CUDA_nvToolsExt_LIBRARY})
   add_definitions(-DDALI_USE_NVTX)
+endif()
+
+##################################################################
+# libjpeg-turbo
+##################################################################
+if (BUILD_JPEG_TURBO)
+  find_package(JPEG 62 REQUIRED) # 1.5.3 version
+  include_directories(SYSTEM ${JPEG_INCLUDE_DIR})
+  message("Using libjpeg-turbo at ${JPEG_LIBRARY}")
+  list(APPEND DALI_LIBS ${JPEG_LIBRARY})
+  add_definitions(-DDALI_USE_JPEG_TURBO)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ljpeg -lturbojpeg")
+else()
+  # Note: Support for disabling libjpeg-turbo is unofficial
+  message(STATUS "Building WITHOUT JpegTurbo")
 endif()
 
 ##################################################################

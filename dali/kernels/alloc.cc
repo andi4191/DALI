@@ -21,6 +21,9 @@
 #include <stdlib.h>
 #endif
 #include "dali/kernels/gpu_utils.h"
+#if defined(__AARCH64_QNX__)
+#include <stdlib.h>
+#endif
 
 namespace dali {
 namespace kernels {

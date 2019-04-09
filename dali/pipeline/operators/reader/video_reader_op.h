@@ -43,8 +43,7 @@ class VideoReader : public DataReader<GPUBackend, SequenceWrapper> {
 
     // TODO(spanev): support rescale
       try {
-        loader_.reset(new VideoLoader(spec, filenames_));
-        dynamic_cast<VideoLoader*>(loader_.get())->init();
+        loader_ = InitLoader<VideoLoader>(spec, filenames_);
         auto w_h = dynamic_cast<VideoLoader*>(loader_.get())->load_width_height(filenames_[0]);
         width_ = static_cast<int>(w_h.first * output_scale_);
         height_ = static_cast<int>(w_h.second * output_scale_);
@@ -79,10 +78,10 @@ class VideoReader : public DataReader<GPUBackend, SequenceWrapper> {
     for (int data_idx = 0; data_idx < batch_size_; ++data_idx) {
       auto* sequence_output = tl_sequence_output.raw_mutable_tensor(data_idx);
 
-      auto* prefetched_sequence = prefetched_batch_[data_idx];
+      auto& prefetched_sequence = GetSample(data_idx);
       tl_sequence_output.type().Copy<GPUBackend, GPUBackend>(sequence_output,
-                                  prefetched_sequence->sequence.raw_data(),
-                                  prefetched_sequence->sequence.size(),
+                                  prefetched_sequence.sequence.raw_data(),
+                                  prefetched_sequence.sequence.size(),
                                   ws->stream());
     }
   }

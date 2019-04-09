@@ -34,6 +34,7 @@ class HybridPipe(dali.pipeline.Pipeline):
                  batch_size,
                  num_threads,
                  device_id,
+                 shard_id,
                  num_gpus,
                  deterministic=False,
                  dali_cpu=True,
@@ -48,7 +49,7 @@ class HybridPipe(dali.pipeline.Pipeline):
             path=tfrec_filenames,
             index_path=tfrec_idx_filenames,
             random_shuffle=True,
-            shard_id=device_id,
+            shard_id=shard_id,
             num_shards=num_gpus,
             initial_fill=10000,
             features={
@@ -59,32 +60,36 @@ class HybridPipe(dali.pipeline.Pipeline):
                 'image/object/bbox/ymin':dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
                 'image/object/bbox/xmax':dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0),
                 'image/object/bbox/ymax':dali.tfrecord.VarLenFeature(dali.tfrecord.float32, 0.0)})
-        if dali_cpu:
-            self.decode = dali.ops.HostDecoderRandomCrop(
-                device="cpu",
-                output_type=dali.types.RGB,
-                random_aspect_ratio=[0.8, 1.25],
-                random_area=[0.1, 1.0],
-                num_attempts=100)
-            resize_device = "cpu"
-        else:
-            self.decode = dali.ops.nvJPEGDecoder(
-                device="mixed",
-                output_type=dali.types.RGB)
-            resize_device = "gpu"
 
         if training:
             if dali_cpu:
-                self.resize = dali.ops.Resize (device=resize_device, resize_x=width, resize_y=height)
-            else:
-                self.resize = dali.ops.RandomResizedCrop(
-                    device=resize_device,
-                    size=[height, width],
-                    interp_type=dali.types.INTERP_LINEAR,
+                self.decode = dali.ops.HostDecoderRandomCrop(
+                    device="cpu",
+                    output_type=dali.types.RGB,
                     random_aspect_ratio=[0.8, 1.25],
                     random_area=[0.1, 1.0],
                     num_attempts=100)
+                resize_device = "cpu"
+            else:
+                self.decode = dali.ops.nvJPEGDecoderRandomCrop(
+                    device="mixed",
+                    output_type=dali.types.RGB,
+                    random_aspect_ratio=[0.8, 1.25],
+                    random_area=[0.1, 1.0],
+                    num_attempts=100)
+                resize_device = "gpu"
+            self.resize = dali.ops.Resize (device=resize_device, resize_x=width, resize_y=height)
         else:
+            if dali_cpu:
+                self.decode = dali.ops.HostDecoder(
+                    device="cpu",
+                    output_type=dali.types.RGB)
+                resize_device = "cpu"
+            else:
+                self.decode = dali.ops.nvJPEGDecoder(
+                    device="mixed",
+                    output_type=dali.types.RGB)
+                resize_device = "gpu"
             # Make sure that every image > 224 for CropMirrorNormalize
             self.resize = dali.ops.Resize (device=resize_device, resize_shorter=256)
 
@@ -128,6 +133,9 @@ class DALIPreprocessor(object):
                  dali_cpu=True,
                  deterministic=False,
                  training=False):
+        device_id = hvd.local_rank()
+        shard_id = hvd.rank()
+        num_gpus = hvd.size()
         pipe = HybridPipe(
             tfrec_filenames=filenames,
             tfrec_idx_filenames=idx_filenames,
@@ -135,8 +143,9 @@ class DALIPreprocessor(object):
             width=width,
             batch_size=batch_size,
             num_threads=num_threads,
-            device_id=hvd.rank(),
-            num_gpus=hvd.size(),
+            device_id=device_id,
+            shard_id=shard_id,
+            num_gpus=num_gpus,
             deterministic=deterministic,
             dali_cpu=dali_cpu,
             training=training)
@@ -148,7 +157,7 @@ class DALIPreprocessor(object):
                 pipeline=pipe,
                 shapes=[(batch_size, height, width, 3), ()],
                 dtypes=[tf.float32, tf.int64],
-                device_id=hvd.rank())
+                device_id=device_id)
 
     def get_device_minibatches(self):
         with tf.device("/gpu:0"):

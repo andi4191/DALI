@@ -15,13 +15,14 @@
 #ifndef DALI_PIPELINE_PIPELINE_H_
 #define DALI_PIPELINE_PIPELINE_H_
 
+#include <chrono>
+#include <limits>
 #include <map>
 #include <memory>
+#include <random>
+#include <string>
 #include <utility>
 #include <vector>
-#include <string>
-#include <random>
-#include <chrono>
 
 #include "dali/common.h"
 #include "dali/pipeline/executor/executor.h"
@@ -29,7 +30,7 @@
 #include "dali/pipeline/data/tensor.h"
 #include "dali/pipeline/data/tensor_list.h"
 #include "dali/pipeline/operators/util/external_source.h"
-#include "dali/pipeline/op_graph.h"
+#include "dali/pipeline/graph/op_graph.h"
 
 
 namespace dali {
@@ -80,21 +81,21 @@ class DLL_PUBLIC Pipeline {
    * @param prefetch_queue_depth sets the length of the executor internal pipeline
    */
   DLL_PUBLIC inline Pipeline(int batch_size, int num_threads, int device_id, int64_t seed = -1,
-      bool pipelined_execution = true, int prefetch_queue_depth = 2,
-      bool async_execution = true, size_t bytes_per_sample_hint = 0,
-      bool set_affinity = false, int max_num_stream = -1) :
-    built_(false) {
-    Init(batch_size, num_threads, device_id, seed,
-         pipelined_execution, async_execution,
-         bytes_per_sample_hint, set_affinity,
-         max_num_stream, prefetch_queue_depth);
+                             bool pipelined_execution = true, int prefetch_queue_depth = 2,
+                             bool async_execution = true, size_t bytes_per_sample_hint = 0,
+                             bool set_affinity = false, int max_num_stream = -1,
+                             int default_cuda_stream_priority = 0)
+      : built_(false), separated_execution_{false} {
+    Init(batch_size, num_threads, device_id, seed, pipelined_execution, separated_execution_,
+         async_execution, bytes_per_sample_hint, set_affinity, max_num_stream,
+         default_cuda_stream_priority, QueueSizes{prefetch_queue_depth});
   }
 
-  DLL_PUBLIC Pipeline(const string &serialized_pipe,
-      int batch_size = -1, int num_threads = -1, int device_id = -1,
-      bool pipelined_execution = true, int prefetch_queue_depth = 2,
-      bool async_execution = true, size_t bytes_per_sample_hint = 0,
-      bool set_affinity = false, int max_num_stream = -1);
+  DLL_PUBLIC Pipeline(const string &serialized_pipe, int batch_size = -1, int num_threads = -1,
+                      int device_id = -1, bool pipelined_execution = true,
+                      int prefetch_queue_depth = 2, bool async_execution = true,
+                      size_t bytes_per_sample_hint = 0, bool set_affinity = false,
+                      int max_num_stream = -1, int default_cuda_stream_priority = 0);
 
   DLL_PUBLIC ~Pipeline() = default;
 
@@ -136,11 +137,11 @@ class DLL_PUBLIC Pipeline {
       // Trying to set data for non existing node is a noop
       return;
     }
-    NodeID node_id = graph_.TensorSourceID(name + "_cpu");
-    DALI_ENFORCE(graph_.NodeType(node_id) == DALI_CPU,
+    OpNodeId node_id = graph_.TensorSourceID(name + "_cpu");
+    DALI_ENFORCE(graph_.NodeType(node_id) == OpType::CPU,
         "Internal error setting external input data.");
 
-    auto &node = graph_.node(node_id);
+    auto &node = graph_.Node(node_id);
     auto *op_ptr = &node.InstantiateOperator();
     ExternalSource<CPUBackend> *source =
       dynamic_cast<ExternalSource<CPUBackend>*>(op_ptr);
@@ -194,6 +195,41 @@ class DLL_PUBLIC Pipeline {
     Build(this->output_names_);
   }
 
+  /**
+   * @brief Set execution characteristics for this Pipeline
+   *
+   * @param pipelined_execution Use pipelined execution
+   * @param separated_execution Use separated queues
+   * @param async_execution Use worker threads for RunX() functions
+   */
+  DLL_PUBLIC void SetExecutionTypes(bool pipelined_execution = true,
+                                    bool separated_execution = false, bool async_execution = true) {
+    DALI_ENFORCE(!built_, "Alterations to the pipeline after "
+        "\"Build()\" has been called are not allowed - cannot change execution type.");
+    pipelined_execution_ = pipelined_execution;
+    separated_execution_ = separated_execution;
+    async_execution_ = async_execution;
+  }
+
+
+  /**
+   * @brief Set queue sizes for Pipeline using Separated Queues
+   *
+   * Must be called before Build()
+   *
+   * @param cpu_size
+   * @param gpu_size
+   */
+  DLL_PUBLIC void SetQueueSizes(int cpu_size, int gpu_size) {
+    DALI_ENFORCE(!built_,
+                 "Alterations to the pipeline after "
+                 "\"Build()\" has been called are not allowed - cannot set queue sizes.");
+    DALI_ENFORCE(separated_execution_ || (cpu_size == gpu_size),
+                 "Setting different queue sizes for non-separated execution is not allowed");
+    DALI_ENFORCE(cpu_size > 0 && gpu_size > 0, "Only positive queue sizes allowed");
+    prefetch_queue_depth_ = QueueSizes(cpu_size, gpu_size);
+  }
+
   /*
    * @brief Set name output_names of the pipeline. Used to update the graph without
    * running the executor.
@@ -215,12 +251,12 @@ class DLL_PUBLIC Pipeline {
    * It blocks next GPU iteration so it is up to the developer to schedule
    * long lasting work in some thread and just fire the work from this CB
    */
-  DLL_PUBLIC void SetCompletionCallback(Executor::ExecutorCallback cb);
+  DLL_PUBLIC void SetCompletionCallback(ExecutorBase::ExecutorCallback cb);
 
   /**
    * @brief Fills the input device workspace with the output of the pipeline.
    * Previously returned buffers are released.
-   * This method blocks until the next batch is complete. RunCPU and RunGPU
+   * This method blocks until the next batch is complete. RunCPU, RunMixed and RunGPU
    * must be called prior to calling this or this method will result in
    * deadlock.
    */
@@ -229,7 +265,7 @@ class DLL_PUBLIC Pipeline {
   /**
    * @brief Fills the input device workspace with the output of the pipeline.
    * To release previously returned buffers ReleaseOutputs need to be called.
-   * This method blocks until the next batch is complete. RunCPU and RunGPU
+   * This method blocks until the next batch is complete. RunCPU, RunMixed and RunGPU
    * must be called prior to calling this or this method will result in
    * deadlock.
    */
@@ -285,32 +321,48 @@ class DLL_PUBLIC Pipeline {
   /**
    * @brief Initializes the Pipeline internal state
    */
-  void Init(int batch_size, int num_threads, int device_id,
-            int64_t seed, bool pipelined_execution, bool async_execution,
-            size_t bytes_per_sample_hint, bool set_affinity,
-            int max_num_stream, int prefetch_queue_depth = 2) {
+  void Init(int batch_size, int num_threads, int device_id, int64_t seed, bool pipelined_execution,
+            bool separated_execution, bool async_execution, size_t bytes_per_sample_hint,
+            bool set_affinity, int max_num_stream, int default_cuda_stream_priority,
+            QueueSizes prefetch_queue_depth = QueueSizes{2}) {
     this->batch_size_ = batch_size;
     this->num_threads_ = num_threads;
     this->device_id_ = device_id;
     this->original_seed_ = seed;
     this->pipelined_execution_ = pipelined_execution;
+    this->separated_execution_ = separated_execution;
     this->async_execution_ = async_execution;
     this->bytes_per_sample_hint_ = bytes_per_sample_hint;
     this->set_affinity_ = set_affinity;
     this->max_num_stream_ = max_num_stream;
+    this->default_cuda_stream_priority_ = default_cuda_stream_priority;
     this->prefetch_queue_depth_ = prefetch_queue_depth;
     DALI_ENFORCE(batch_size_ > 0, "Batch size must be greater than 0");
+
+    int lowest_cuda_stream_priority, highest_cuda_stream_priority;
+    CUDA_CALL(cudaDeviceGetStreamPriorityRange(&lowest_cuda_stream_priority,
+                                               &highest_cuda_stream_priority));
+    const auto min_priority_value =
+        std::min(lowest_cuda_stream_priority, highest_cuda_stream_priority);
+    const auto max_priority_value =
+        std::max(lowest_cuda_stream_priority, highest_cuda_stream_priority);
+    DALI_ENFORCE(
+        default_cuda_stream_priority >= min_priority_value &&
+        default_cuda_stream_priority <= max_priority_value,
+        "Provided default cuda stream priority `" + std::to_string(default_cuda_stream_priority) +
+        "` is outside the priority range [" + std::to_string(min_priority_value) + ", " +
+        std::to_string(max_priority_value) + "], with lowest priority being `" +
+        std::to_string(lowest_cuda_stream_priority) + "` and highest priority being `" +
+        std::to_string(highest_cuda_stream_priority) + "`");
+
     seed_.resize(MAX_SEEDS);
     current_seed_ = 0;
-    if (seed > -1) {
-      std::seed_seq ss{seed};
-      ss.generate(seed_.begin(), seed_.end());
-    } else {
+    if (seed < 0) {
       using Clock = std::chrono::high_resolution_clock;
-      auto init_value = Clock::now().time_since_epoch().count();
-      std::seed_seq ss{init_value};
-      ss.generate(seed_.begin(), seed_.end());
+      seed = Clock::now().time_since_epoch().count();
     }
+    std::seed_seq ss{seed};
+    ss.generate(seed_.begin(), seed_.end());
   }
 
   using EdgeMeta = struct {
@@ -359,23 +411,28 @@ class DLL_PUBLIC Pipeline {
 
   void PropagateMemoryHint(OpNode &node);
 
+  // Helper for nvJPEGDecoder split_stages special handling
+  inline void AddSplitNvJPEGDecoder(OpSpec &spec, const std::string &inst_name);
+
   const int MAX_SEEDS = 1024;
 
   bool built_;
   int batch_size_, num_threads_, device_id_;
   bool pipelined_execution_;
+  bool separated_execution_;
   bool async_execution_;
   size_t bytes_per_sample_hint_;
   int set_affinity_;
   int max_num_stream_;
-  int prefetch_queue_depth_;
+  int default_cuda_stream_priority_;
+  QueueSizes prefetch_queue_depth_;
 
   std::vector<int64_t> seed_;
   int original_seed_;
   size_t current_seed_;
 
   OpGraph graph_;
-  std::unique_ptr<Executor> executor_;
+  std::unique_ptr<ExecutorBase> executor_;
   std::map<string, EdgeMeta> edge_names_;
 
   // store a list of all OpSpec and external inputs

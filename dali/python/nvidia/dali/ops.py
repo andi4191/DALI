@@ -21,8 +21,6 @@ from nvidia.dali.edge import EdgeReference
 from nvidia.dali.types import _type_name_convert_to_string, _type_convert_value, DALIDataType
 from future.utils import with_metaclass
 
-_blacklisted_ops = set(["MakeContiguous"])
-
 def _docstring_generator(cls):
     __cpu_ops = set(b.RegisteredCPUOps())
     __cpu_ops.add("TFRecordReader")
@@ -39,12 +37,18 @@ def _docstring_generator(cls):
         op_dev.append("'mixed'")
     if op_name in __support_ops:
         op_dev.append("'support'")
-    pre_doc = "This is " + ", ".join(op_dev) + " operator\n\n"
+    pre_doc = "This is a " + ", ".join(op_dev) + " operator\n\n"
 
     schema = b.GetSchema(op_name)
-    ret = pre_doc
+    # insert tag to easily link to the operator
+    ret = '.. _' + op_name + ':\n\n'
+    ret += pre_doc
     ret += schema.Dox()
     ret += '\n'
+    if schema.IsSequenceOperator():
+        ret += "\nThis operator expects sequence inputs\n"
+    elif schema.AllowsSequences():
+        ret += "\nThis operator allows sequence inputs\n"
     ret += """
 Parameters
 ----------
@@ -253,9 +257,6 @@ def _load_ops():
     _cpugpu_ops = (set(b.RegisteredCPUOps())
                 .union(set(b.RegisteredGPUOps()))
                 .union(set(b.RegisteredMixedOps())))
-
-    _cpugpu_ops -= _blacklisted_ops
-
     _support_ops = set(b.RegisteredSupportOps())
     for op_name in _cpugpu_ops:
         setattr(sys.modules[__name__], op_name,

@@ -90,44 +90,52 @@ vector<std::pair<string, int>> filesystem::traverse_directories(const std::strin
   return file_label_pairs;
 }
 
-void FileLoader::PrepareEmpty(ImageLabelWrapper *image_label) {
-  PrepareEmptyTensor(&image_label->image);
+void FileLoader::PrepareEmpty(ImageLabelWrapper &image_label) {
+  PrepareEmptyTensor(image_label.image);
 }
 
-void FileLoader::ReadSample(ImageLabelWrapper* image_label) {
+void FileLoader::ReadSample(ImageLabelWrapper &image_label) {
   auto image_pair = image_label_pairs_[current_index_++];
 
   // handle wrap-around
-  if (current_index_ == Size()) {
-    current_index_ = 0;
+  MoveToNextShard(current_index_);
+
+  // copy the label
+  image_label.label = image_pair.second;
+  image_label.image.SetSourceInfo(image_pair.first);
+  image_label.image.SetSkipSample(false);
+
+  // if image is cached, skip loading
+  if (ShouldSkipImage(image_pair.first)) {
+    image_label.image.set_type(TypeInfo::Create<uint8_t>());
+    image_label.image.Resize({1});
+    image_label.image.SetSkipSample(true);
+    return;
   }
 
   auto current_image = FileStream::Open(file_root_ + "/" + image_pair.first, read_ahead_);
   Index image_size = current_image->Size();
 
   if (copy_read_data_) {
-    image_label->image.Resize({image_size});
+    image_label.image.Resize({image_size});
     // copy the image
-    current_image->Read(image_label->image.mutable_data<uint8_t>(), image_size);
+    current_image->Read(image_label.image.mutable_data<uint8_t>(), image_size);
   } else {
     auto p = current_image->Get(image_size);
     // Wrap the raw data in the Tensor object.
-    image_label->image.ShareData(p, image_size, {image_size});
-
-    TypeInfo type;
-    type.SetType<uint8_t>();
-    image_label->image.set_type(type);
+    image_label.image.ShareData(p, image_size, {image_size});
+    image_label.image.set_type(TypeInfo::Create<uint8_t>());
   }
 
-  image_label->image.SetSourceInfo(image_pair.first);
+  image_label.image.SetSourceInfo(image_pair.first);
   // close the file handle
   current_image->Close();
 
   // copy the label
-  image_label->label = image_pair.second;
+  image_label.label = image_pair.second;
 }
 
-Index FileLoader::Size() {
+Index FileLoader::SizeImpl() {
   return static_cast<Index>(image_label_pairs_.size());
 }
 }  // namespace dali

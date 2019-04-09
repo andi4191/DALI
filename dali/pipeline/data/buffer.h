@@ -26,21 +26,11 @@
 #include "dali/common.h"
 #include "dali/error_handling.h"
 #include "dali/pipeline/data/types.h"
+#include "dali/kernels/util.h"
 
 namespace dali {
 
 class GPUBackend;
-
-// Helper function to get product of dims
-inline Index Product(vector<Index>::const_iterator it_begin,
-                     vector<Index>::const_iterator it_end) {
-  if (it_begin == it_end) return 0;
-  return std::accumulate(it_begin, it_end, 1, std::multiplies<Index>());
-}
-
-inline Index Product(const vector<Index> &shape) {
-  return Product(shape.begin(), shape.end());
-}
 
 // Helper function to get a string of the data shape
 inline string ShapeString(vector<Index> shape) {
@@ -133,6 +123,9 @@ class Buffer {
    * the non-const version of the method, or calling 'set_type'.
    */
   inline void* raw_mutable_data() {
+    // Empty tensor
+    if (data_ == nullptr)
+      return nullptr;
     DALI_ENFORCE(IsValidType(type_),
         "Buffer has no type, 'mutable_data<T>()' or 'set_type' must "
         "be called on non-const buffer to set valid type");
@@ -145,6 +138,9 @@ class Buffer {
    * the non-const version of the method, or calling 'set_type'.
    */
   inline const void* raw_data() const {
+    // Empty tensor
+    if (data_ == nullptr)
+      return nullptr;
     DALI_ENFORCE(IsValidType(type_),
         "Buffer has no type, 'mutable_data<T>()' or 'set_type' must "
         "be called on non-const buffer to set valid type");
@@ -171,6 +167,13 @@ class Buffer {
    */
   inline size_t capacity() const {
     return num_bytes_;
+  }
+
+  /**
+   * @brief Returns the padding value of allocations caused by Resize() call
+   */
+  static inline size_t padding() {
+    return kPaddding;
   }
 
   /**
@@ -276,23 +279,32 @@ class Buffer {
   inline void ResizeHelper(Index new_size) {
     DALI_ENFORCE(new_size >= 0, "Input size less than zero not supported.");
 
-    if (!IsValidType(type_)) {
-      size_ = new_size;
+    size_ = new_size;
+
+    if (new_size == 0) {
+      if (std::is_same<Backend, GPUBackend>::value && device_ == -1) {
+        CUDA_CALL(cudaGetDevice(&device_));
+      }
       return;
     }
 
-    size_ = new_size;
+    if (!IsValidType(type_)) {
+      return;
+    }
 
     size_t new_num_bytes = new_size * type_.size();
     if (new_num_bytes > num_bytes_) {
-      size_t grow = num_bytes_*alloc_mult;
+      size_t grow = num_bytes_*kAllocMult;
+      grow = (grow + kPaddding) & ~(kPaddding - 1);
       if (grow > new_num_bytes)
         new_num_bytes = grow;
       reserve(new_num_bytes);
     }
   }
 
-  const double alloc_mult = 1.0;
+  const double kAllocMult = 1.0;
+  // round to 1kB
+  static constexpr size_t kPaddding = 1024;
 
   Backend backend_;
 

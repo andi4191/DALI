@@ -94,29 +94,27 @@ std::vector<std::vector<std::string>> GenerateSequences(
 
 }  // namespace detail
 
-void SequenceLoader::PrepareEmpty(TensorSequence *sequence) {
-  sequence->tensors.resize(sequence_length_);
-  for (auto &t : sequence->tensors) {
-    PrepareEmptyTensor(&t);
+void SequenceLoader::PrepareEmpty(TensorSequence &sequence) {
+  sequence.tensors.resize(sequence_length_);
+  for (auto &t : sequence.tensors) {
+    PrepareEmptyTensor(t);
   }
 }
 
-void SequenceLoader::ReadSample(TensorSequence *sequence) {
+void SequenceLoader::ReadSample(TensorSequence &sequence) {
   // TODO(klecki) this is written as a prototype for video handling
   const auto &sequence_paths = sequences_[current_sequence_];
   // TODO(klecki) we probably should buffer the "stream", or recently used
   // frames
   for (int i = 0; i < sequence_length_; i++) {
-    LoadFrame(sequence_paths, i, &sequence->tensors[i]);
+    LoadFrame(sequence_paths, i, &sequence.tensors[i]);
   }
   current_sequence_++;
   // wrap-around
-  if (current_sequence_ == total_size_) {
-    current_sequence_ = 0;
-  }
+  MoveToNextShard(current_sequence_);
 }
 
-Index SequenceLoader::Size() {
+Index SequenceLoader::SizeImpl() {
   return total_size_;
 }
 
@@ -124,30 +122,29 @@ void SequenceLoader::LoadFrame(const std::vector<std::string> &s, Index frame_id
                                Tensor<CPUBackend> *target) {
   const auto frame_filename = s[frame_idx];
   target->SetSourceInfo(frame_filename);
+  target->SetSkipSample(false);
+
+  // if image is cached, skip loading
+  if (ShouldSkipImage(frame_filename)) {
+    target->set_type(TypeInfo::Create<uint8_t>());
+    target->Resize({1});
+    target->SetSkipSample(true);
+    return;
+  }
+
   auto frame = FileStream::Open(frame_filename, read_ahead_);
   Index frame_size = frame->Size();
-// ToDo - move to mmap version bellow when more tests are available
-#if 1
-  target->Resize({frame_size});
-  frame->Read(target->mutable_data<uint8_t>(), frame_size);
-  frame->Close();
-#else
   // Release and unmap memory previously obtained by Get call
   if (copy_read_data_) {
     target->Resize({frame_size});
     frame->Read(target->mutable_data<uint8_t>(), frame_size);
   } else {
-    auto p = target->Get(frame_size);
+    auto p = frame->Get(frame_size);
     // Wrap the raw data in the Tensor object.
     target->ShareData(p, frame_size, {frame_size});
-
-    TypeInfo type;
-    type.SetType<uint8_t>();
-    target->set_type(type);
+    target->set_type(TypeInfo::Create<uint8_t>());
   }
-  target->SetSourceInfo(frame_filename);
   frame->Close();
-#endif
 }
 
 }  // namespace dali

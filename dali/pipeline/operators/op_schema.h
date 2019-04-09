@@ -41,20 +41,23 @@ class DLL_PUBLIC OpSchema {
   OpSchema &operator=(OpSchema &&) = default;
 
   DLL_PUBLIC explicit inline OpSchema(const std::string &name)
-    : name_(name),
-      allow_multiple_input_sets_(false),
-      enforce_layout_(false) {
+    : name_(name)
+    , allow_multiple_input_sets_(false)
+    , enforce_layout_(false)
+    , allow_sequences_(false)
+    , is_sequence_operator_(false)
+    , is_internal_(false) {
     // Fill internal arguments
     auto v = Value::construct(-1);
-    internal_arguments_["num_threads"] = std::make_pair("Number of CPU threads in a thread pool",
-        v.get());
+    internal_arguments_["num_threads"] =
+        std::make_pair("Number of CPU threads in a thread pool", v.get());
     internal_arguments_unq_.push_back(std::move(v));
     v = Value::construct(-1);
     internal_arguments_["batch_size"] = std::make_pair("Batch size", v.get());
     internal_arguments_unq_.push_back(std::move(v));
     v = Value::construct(1);
-    internal_arguments_["num_input_sets"] = std::make_pair("Number of input sets given to an Op",
-        v.get());
+    internal_arguments_["num_input_sets"] =
+        std::make_pair("Number of input sets given to an Op", v.get());
     internal_arguments_unq_.push_back(std::move(v));
     v = Value::construct(std::string("cpu"));
     internal_arguments_["device"] = std::make_pair("Device on which the Op is run", v.get());
@@ -62,8 +65,14 @@ class DLL_PUBLIC OpSchema {
     v = Value::construct(false);
     internal_arguments_["inplace"] = std::make_pair("Whether Op can be run in place", v.get());
     internal_arguments_unq_.push_back(std::move(v));
+    v = Value::construct(0);
+    internal_arguments_["default_cuda_stream_priority"] =
+        std::make_pair("Default cuda stream priority", v.get());
+    internal_arguments_unq_.push_back(std::move(v));
 
-    AddOptionalArg("seed", "Random seed", 1234);
+    AddOptionalArg("seed", "Random seed (If not provided it will be populated based "
+      "on the global seed of the pipeline)", -1);
+
     AddOptionalArg("bytes_per_sample_hint", "Output size hint (bytes), "
       "per sample. The memory will be preallocated if it uses GPU or page-locked memory", 0);
   }
@@ -150,6 +159,30 @@ class DLL_PUBLIC OpSchema {
    */
   DLL_PUBLIC inline OpSchema& AllowMultipleInputSets() {
     allow_multiple_input_sets_ = true;
+    return *this;
+  }
+
+  /**
+   * @brief Notes that this operator expects sequence inputs exclusively
+   */
+  DLL_PUBLIC inline OpSchema& SequenceOperator() {
+    is_sequence_operator_ = true;
+    return *this;
+  }
+
+  /**
+   * @brief Notes that sequences can be used with this op
+   */
+  DLL_PUBLIC inline OpSchema& AllowSequences() {
+    allow_sequences_ = true;
+    return *this;
+  }
+
+  /**
+   * @brief Notes that this operator is internal to DALI backend (and shouldn't be exposed in Python API)
+   */
+  DLL_PUBLIC inline OpSchema& MakeInternal() {
+    is_internal_ = true;
     return *this;
   }
 
@@ -263,6 +296,18 @@ class DLL_PUBLIC OpSchema {
     return layout_;
   }
 
+  DLL_PUBLIC inline bool IsSequenceOperator() const {
+    return is_sequence_operator_;
+  }
+
+  DLL_PUBLIC inline bool AllowsSequences() const {
+    return allow_sequences_;
+  }
+
+  DLL_PUBLIC inline bool IsInternal() const {
+    return is_internal_;
+  }
+
   DLL_PUBLIC inline bool HasOutputFn() const {
     return static_cast<bool>(output_fn_);
   }
@@ -325,6 +370,11 @@ class DLL_PUBLIC OpSchema {
 
   bool enforce_layout_;
   DALITensorLayout layout_;
+
+  bool allow_sequences_;
+  bool is_sequence_operator_;
+
+  bool is_internal_;
 
   std::map<std::string, std::pair<std::string, DALIDataType> > arguments_;
   std::map<std::string, std::pair<std::string, Value*> > optional_arguments_;

@@ -24,6 +24,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "dali/api_helper.h"
@@ -55,6 +56,29 @@ using uint32 = uint32_t;
 // Basic data type for our indices and dimension sizes
 typedef int64_t Index;
 
+enum class OpType {
+  GPU = 0,
+  CPU = 1,
+  MIXED = 2,
+  SUPPORT = 3,
+  COUNT = 4
+};
+
+static std::string to_string(OpType op_type) {
+  switch (op_type) {
+    case OpType::CPU:
+      return "cpu";
+    case OpType::GPU:
+      return "gpu";
+    case OpType::MIXED:
+      return "mixed";
+    case OpType::SUPPORT:
+      return "support";
+    default:
+      return "<invalid>";
+  }
+}
+
 struct DALISize {
     int width;
     int height;
@@ -66,7 +90,10 @@ struct DALISize {
 enum DALIInterpType {
   DALI_INTERP_NN = 0,
   DALI_INTERP_LINEAR = 1,
-  DALI_INTERP_CUBIC = 2
+  DALI_INTERP_CUBIC = 2,
+  DALI_INTERP_LANCZOS3 = 3,
+  DALI_INTERP_TRIANGULAR = 4,
+  DALI_INTERP_GAUSSIAN = 5,
 };
 
 /**
@@ -87,7 +114,8 @@ enum DALITensorLayout {
   DALI_NCHW  = 0,
   DALI_NHWC  = 1,
   DALI_NFHWC = 2,
-  DALI_SAME  = 3
+  DALI_NFCHW = 3,
+  DALI_SAME  = 4
 };
 
 inline bool IsColor(DALIImageType type) {
@@ -205,11 +233,39 @@ inline std::string to_string(const DALITensorLayout& layout) {
       return "NHWC";
     case DALI_NFHWC:
       return "NFHWC";
+    case DALI_NFCHW:
+      return "NFCHW";
     case DALI_SAME:
       return "SAME";
     default:
       return "<unknown>";
   }
+}
+
+inline DALITensorLayout GetElementLayout(DALITensorLayout sequence_layout) {
+  switch (sequence_layout) {
+    case DALI_NFHWC:
+      return DALI_NHWC;
+    case DALI_NFCHW:
+      return DALI_NCHW;
+    default:  // if cannot produce anything meaningful, keep the same layout
+      return sequence_layout;
+  }
+}
+
+inline DALITensorLayout GetSequenceLayout(DALITensorLayout element_layout) {
+  switch (element_layout) {
+    case DALI_NHWC:
+      return DALI_NFHWC;
+    case DALI_NCHW:
+      return DALI_NFCHW;
+    default:  // if cannot produce anything meaningful, keep the same layout
+      return element_layout;
+  }
+}
+
+inline bool IsSequence(DALITensorLayout layout) {
+  return layout == DALI_NFHWC || layout == DALI_NFCHW;
 }
 
 template <typename T>
@@ -246,6 +302,9 @@ template <typename T, size_t A>
 struct is_std_array<std::array<T, A> > : std::true_type {};
 
 std::vector<std::string> string_split(const std::string &s, const char delim);
+
+template <bool Value, typename Type = void>
+using enable_if_t = typename std::enable_if<Value, Type>::type;
 
 }  // namespace dali
 

@@ -255,6 +255,11 @@ struct TensorListViewBase {
   ptrdiff_t num_elements() const { return offsets.empty() ? 0 : offsets[size()]; }
   int sample_dim() const { return shape.sample_dim(); }
 
+  /// @brief Update offsets after shape has been changed
+  void update_offsets() {
+    calculate_offsets(offsets, shape);
+  }
+
   template <int other_sample_ndim>
   TensorListView<Backend, DataType, other_sample_ndim> to_static() {
     static_assert(other_sample_ndim != DynamicDimensions,
@@ -410,18 +415,50 @@ TensorListView<StorageGPU, T, ndim> make_tensor_list_gpu(T *data, TensorListShap
 }
 
 
-template <typename Backend, typename T, int ndim>
-struct element_type<TensorView<Backend, T, ndim>> {
-  using type = T;
-};
+/// @brief Get a subtensor by slicing along outermost dimension at position `pos`
+///
+/// @details Produces tensor, for which number of dimensions is reduced by 1.
+/// Removed dimension is outer-most (e.g. for shape {3,2,4,6} produces {2,4,6}).
+/// Data inside the tensor is extracted according to provided index.
+/// Data is not copied.
+///
+/// Example:
+/// tv.data = [[1, 2, 3], [4, 5, 6]]       (shape: [2, 3])
+/// oust_dimension(tv, 1) -> [4, 5, 6]     (shape: [3])
+///
+/// @param source Source TensorView
+/// @param idx Index inside dimension, along which data is extracted
+/// @return TensorView with reduced dimensionality
+template<typename StorageBackend, typename DataType, int ndims>
+TensorView<StorageBackend, DataType, ndims - 1>
+subtensor(TensorView<StorageBackend, DataType, ndims> source, int64_t pos) {
+  TensorShape<ndims - 1> shape = source.shape.template last<ndims - 1>();
+  DataType *data = source.data + pos * volume(shape);
+  return make_tensor<StorageBackend>(data, shape);
+}
 
-template <typename Backend, typename T, int ndim>
-struct element_type<TensorListView<Backend, T, ndim>> {
-  using type = T;
-};
 
+/// @brief Overload for Dynamic TensorView
+template<typename StorageBackend, typename DataType>
+TensorView<StorageBackend, DataType, DynamicDimensions>
+subtensor(TensorView<StorageBackend, DataType, DynamicDimensions> source, int64_t pos) {
+  auto shape = source.shape.last(source.dim() - 1);
+  DataType *data = source.data + pos * volume(shape);
+  return make_tensor<StorageBackend>(data, std::move(shape));
+}
 
 }  // namespace kernels
+
+template <typename Backend, typename T, int ndim>
+struct element_type<kernels::TensorView<Backend, T, ndim>> {
+  using type = T;
+};
+
+template <typename Backend, typename T, int ndim>
+struct element_type<kernels::TensorListView<Backend, T, ndim>> {
+  using type = T;
+};
+
 }  // namespace dali
 
 #endif  // DALI_KERNELS_TENSOR_VIEW_H_

@@ -1,6 +1,6 @@
 #!/bin/bash -e
 # used pip packages
-pip_packages="jupyter numpy matplotlib opencv-python"
+pip_packages="jupyter numpy matplotlib"
 
 pushd ../..
 
@@ -11,10 +11,13 @@ cd docs/examples
 
 test_body() {
     # test code
-    ls *.ipynb | xargs -i jupyter nbconvert \
-                   --to notebook --inplace --execute \
-                   --ExecutePreprocessor.kernel_name=python${PYVER:0:1} \
-                   --ExecutePreprocessor.timeout=300 {}
+    # dummy patern
+    black_list_files="#"
+
+    ls *.ipynb | sed "/${black_list_files}/d" | xargs -i jupyter nbconvert \
+                    --to notebook --inplace --execute \
+                    --ExecutePreprocessor.kernel_name=python${PYVER:0:1} \
+                    --ExecutePreprocessor.timeout=300 {}
 }
 
 source ../../qa/test_template.sh

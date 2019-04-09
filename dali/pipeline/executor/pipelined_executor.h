@@ -35,69 +35,29 @@ namespace dali {
  * see large performance benefits from pipelining the cpu, mixed,
  * and gpu portions of the graph.
  */
-class DLL_PUBLIC PipelinedExecutor : public Executor {
+template <typename WorkspacePolicy, typename QueuePolicy>
+class DLL_PUBLIC PipelinedExecutorImpl : public Executor<WorkspacePolicy, QueuePolicy> {
  public:
-  DLL_PUBLIC inline PipelinedExecutor(int batch_size, int num_thread,
-      int device_id, size_t bytes_per_sample_hint,
-      bool set_affinity = false, int max_num_stream = -1, int prefetch_queue_depth = 2) :
-    Executor(batch_size, num_thread, device_id, bytes_per_sample_hint,
-        set_affinity, max_num_stream, prefetch_queue_depth) {
+  DLL_PUBLIC inline PipelinedExecutorImpl(int batch_size, int num_thread, int device_id,
+                                          size_t bytes_per_sample_hint, bool set_affinity = false,
+                                          int max_num_stream = -1,
+                                          int default_cuda_stream_priority = 0,
+                                          QueueSizes prefetch_queue_depth = {2, 2})
+      : Executor<WorkspacePolicy, QueuePolicy>(batch_size, num_thread, device_id,
+                                               bytes_per_sample_hint, set_affinity, max_num_stream,
+                                               default_cuda_stream_priority, prefetch_queue_depth) {
   }
 
-  DLL_PUBLIC ~PipelinedExecutor() override = default;
+  DLL_PUBLIC ~PipelinedExecutorImpl() override = default;
 
   DLL_PUBLIC void Build(OpGraph *graph, vector<string> output_names) override;
 
-  DISABLE_COPY_MOVE_ASSIGN(PipelinedExecutor);
+  DISABLE_COPY_MOVE_ASSIGN(PipelinedExecutorImpl);
 
  protected:
-  void SetupStageOutputsForGraph();
+  void SetupOutputInfo(const OpGraph &graph) override;
 
-  void SetStageOutputsForIter(int queue_idx, WorkspaceBlob *wsb);
-
-  std::vector<int> GetMemoryHints(const OpSpec &spec);
-
-
-  template <typename Backend>
-  class TensorVectorPool {
-   public:
-    inline TensorVectorPool(int size, int batch_size, size_t bytes_hint, bool pinned = false) {
-      tvs_.resize(size);
-      for (int i = 0; i < size; ++i) {
-        for (int j = 0; j < batch_size; ++j) {
-          tvs_[i].push_back(std::make_shared<Tensor<Backend>>());
-          tvs_[i].back()->set_pinned(pinned);
-          if (pinned || std::is_same<Backend, GPUBackend>::value)
-            tvs_[i].back()->reserve(bytes_hint);
-        }
-      }
-    }
-
-    inline const vector<shared_ptr<Tensor<Backend>>> &Get(int idx) {
-      return tvs_[idx];
-    }
-   private:
-    vector<vector<shared_ptr<Tensor<Backend>>>> tvs_;
-  };
-
-  template <typename Backend>
-  class TensorPool {
-   public:
-    inline TensorPool(int size, int, size_t bytes_hint, bool pinned = false) {
-      for (int i = 0; i < size; ++i) {
-        ts_.push_back(std::make_shared<Tensor<Backend>>());
-        ts_.back()->set_pinned(pinned);
-        if (pinned || std::is_same<Backend, GPUBackend>::value)
-          ts_.back()->reserve(bytes_hint);
-      }
-    }
-
-    inline shared_ptr<Tensor<Backend>> Get(int idx) {
-      return ts_[idx];
-    }
-   private:
-    vector<shared_ptr<Tensor<Backend>>> ts_;
-  };
+  std::vector<int> GetTensorQueueSizes(const OpGraph &graph) override;
 
   // Note: Pipelining the cpu, mixed, and gpu execution
   // can be viewed as prefetching each stage w.r.t. the
@@ -110,17 +70,67 @@ class DLL_PUBLIC PipelinedExecutor : public Executor {
   // we do not worry about CPU outputs of the mixed
   // stage, as these will only be created as outputs
   // requested by the user.
-  vector<TensorPool<CPUBackend>> support_stage_outputs_;
-  vector<TensorVectorPool<CPUBackend>> cpu_stage_outputs_;
-  vector<TensorListPool<CPUBackend>> mixed_stage_cpu_outputs_;
-  vector<TensorListPool<GPUBackend>> mixed_stage_gpu_outputs_;
-  vector<OutputInfo> support_stage_output_info_;
-  vector<OutputInfo> cpu_stage_output_info_;
-  vector<OutputInfo> mixed_stage_cpu_output_info_;
-  vector<OutputInfo> mixed_stage_gpu_output_info_;
 
-  USE_EXECUTOR_MEMBERS();
+  std::vector<std::vector<TensorNodeId>> stage_outputs_;
+
+  using Executor<WorkspacePolicy, QueuePolicy>::device_id_;
+  using Executor<WorkspacePolicy, QueuePolicy>::stage_queue_depths_;
 };
+
+template <typename WorkspacePolicy, typename QueuePolicy>
+void PipelinedExecutorImpl<WorkspacePolicy, QueuePolicy>::Build(OpGraph *graph,
+                                                                vector<string> output_names) {
+  Executor<WorkspacePolicy, QueuePolicy>::Build(graph, output_names);
+}
+
+template <typename WorkspacePolicy, typename QueuePolicy>
+void PipelinedExecutorImpl<WorkspacePolicy, QueuePolicy>::SetupOutputInfo(const OpGraph &graph) {
+  DeviceGuard g(device_id_);
+  Executor<WorkspacePolicy, QueuePolicy>::SetupOutputInfo(graph);
+  constexpr auto stages_count = static_cast<int>(OpType::COUNT);
+  stage_outputs_.resize(stages_count);
+  for (int stage = 0; stage < stages_count; stage++) {
+    stage_outputs_[stage] = graph.GetStageOutputs(static_cast<OpType>(stage));
+  }
+}
+
+template <typename WorkspacePolicy, typename QueuePolicy>
+std::vector<int> PipelinedExecutorImpl<WorkspacePolicy, QueuePolicy>::GetTensorQueueSizes(
+    const OpGraph &graph) {
+  Executor<WorkspacePolicy, QueuePolicy>::GetTensorQueueSizes(graph);
+  std::vector<int> result = Executor<WorkspacePolicy, QueuePolicy>::GetTensorQueueSizes(graph);
+  for (int stage = 0; stage < static_cast<int>(OpType::COUNT); stage++) {
+    if (static_cast<OpType>(stage) == OpType::SUPPORT) {
+      for (auto tid : stage_outputs_[stage]) {
+        auto &tensor = graph.Tensor(tid);
+        int consumers = tensor.consumers.size();
+        int cpu_consumers = 0, gpu_consumers = 0;
+        for (auto cons_edge : tensor.consumers) {
+          if (graph.Node(cons_edge.node).op_type == OpType::CPU) {
+            cpu_consumers++;
+          } else {
+            gpu_consumers++;
+          }
+        }
+
+        // We do not buffer if we do not touch GPU (SUPPORT is synchronous with CPU)
+        // otherwise we buffer for a pair of CPU x GPU
+        result[tid] = gpu_consumers == 0 ? 1 : stage_queue_depths_[static_cast<OpType>(stage)];
+      }
+
+    } else {
+      for (auto id : stage_outputs_[stage]) {
+        result[id] = stage_queue_depths_[static_cast<OpType>(stage)];
+      }
+    }
+  }
+  return result;
+}
+
+using PipelinedExecutor =
+    PipelinedExecutorImpl<AOT_WS_Policy<UniformQueuePolicy>, UniformQueuePolicy>;
+using SeparatedPipelinedExecutor =
+    PipelinedExecutorImpl<AOT_WS_Policy<SeparateQueuePolicy>, SeparateQueuePolicy>;
 
 }  // namespace dali
 

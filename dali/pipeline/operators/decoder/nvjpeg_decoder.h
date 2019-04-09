@@ -25,13 +25,15 @@
 #include <utility>
 #include <functional>
 #include <string>
-
+#include <memory>
 #include "dali/pipeline/operators/operator.h"
+#include "dali/pipeline/operators/decoder/cache/cached_decoder_impl.h"
 #include "dali/pipeline/util/thread_pool.h"
-#include "dali/pipeline/util/device_guard.h"
+#include "dali/util/device_guard.h"
 #include "dali/util/image.h"
 #include "dali/util/ocv.h"
 #include "dali/image/image_factory.h"
+#include "dali/common.h"
 
 namespace dali {
 
@@ -113,10 +115,11 @@ inline bool SupportedSubsampling(const nvjpegChromaSubsampling_t &subsampling) {
   }
 }
 
-class nvJPEGDecoder : public Operator<MixedBackend> {
+class nvJPEGDecoder : public Operator<MixedBackend>, CachedDecoderImpl {
  public:
   explicit nvJPEGDecoder(const OpSpec& spec) :
     Operator<MixedBackend>(spec),
+    CachedDecoderImpl(spec),
     max_streams_(spec.GetArgument<int>("num_threads")),
     output_type_(spec.GetArgument<DALIImageType>("output_type")),
     output_shape_(batch_size_),
@@ -124,9 +127,8 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
     use_batched_decode_(spec.GetArgument<bool>("use_batched_decode")),
     batched_image_idx_(batch_size_),
     batched_output_(batch_size_),
-    thread_pool_(max_streams_,
-                 spec.GetArgument<int>("device_id"),
-                 true /* pin threads */) {
+    device_id_(spec.GetArgument<int>("device_id")),
+    thread_pool_(max_streams_, device_id_, true /* pin threads */) {
       // Setup the allocator struct to use our internal allocator
       nvjpegDevAllocator_t allocator;
       allocator.dev_malloc = &memory::DeviceNew;
@@ -136,8 +138,6 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
       streams_.reserve(max_streams_);
       states_.reserve(max_streams_);
       events_.reserve(max_streams_);
-
-      cudaGetDevice(&device_id_);
 
 #if defined(NVJPEG_LIBRARY_0_2_0)
       NVJPEG_CALL(nvjpegCreateEx(NVJPEG_BACKEND_DEFAULT, &allocator, nullptr, 0, &handle_));
@@ -150,24 +150,29 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
 #endif
       for (int i = 0; i < max_streams_; ++i) {
         NVJPEG_CALL(nvjpegJpegStateCreate(handle_, &states_[i]));
-        CUDA_CALL(cudaStreamCreateWithFlags(&streams_[i], cudaStreamNonBlocking));
+        CUDA_CALL(cudaStreamCreateWithPriority(&streams_[i], cudaStreamNonBlocking,
+                                               default_cuda_stream_priority_));
         CUDA_CALL(cudaEventCreate(&events_[i]));
       }
       CUDA_CALL(cudaEventCreate(&master_event_));
   }
 
-  ~nvJPEGDecoder() noexcept(false) {
-    DeviceGuard g(device_id_);
-    for (int i = 0; i < max_streams_; ++i) {
-      NVJPEG_CALL(nvjpegJpegStateDestroy(states_[i]));
-      CUDA_CALL(cudaEventDestroy(events_[i]));
-      CUDA_CALL(cudaStreamDestroy(streams_[i]));
+  ~nvJPEGDecoder() noexcept override {
+    try {
+      DeviceGuard g(device_id_);
+      for (int i = 0; i < max_streams_; ++i) {
+        NVJPEG_CALL(nvjpegJpegStateDestroy(states_[i]));
+        CUDA_CALL(cudaEventDestroy(events_[i]));
+        CUDA_CALL(cudaStreamDestroy(streams_[i]));
+      }
+      NVJPEG_CALL(nvjpegDestroy(handle_));
+    } catch(const std::exception& e) {
+      ERROR_LOG << "Failed to destruct: " << e.what() << std::endl;
+      // nothing we can do
     }
-    NVJPEG_CALL(nvjpegDestroy(handle_));
   }
 
   using dali::OperatorBase::Run;
-
   void Run(MixedWorkspace *ws) override {
     // TODO(slayton): Is this necessary?
     // CUDA_CALL(cudaStreamSynchronize(ws->stream()));
@@ -222,7 +227,7 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
       const int image_depth = (output_type_ == DALI_GRAY) ? 1 : 3;
       output_shape_[i] = Dims({info.heights[0], info.widths[0], image_depth});
       output_info_[i] = info;
-      image_order[i] = std::make_pair(Product(output_shape_[i]), i);
+      image_order[i] = std::make_pair(volume(output_shape_[i]), i);
     }
 
     // Resize the output (contiguous)
@@ -292,31 +297,43 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
       // (for load balancing)
       std::sort(image_order.begin(), image_order.end(),
                 std::greater<std::pair<size_t, size_t>>());
+
       // Loop over images again and decode
       for (int i = 0; i < batch_size_; ++i) {
         size_t j = image_order[i].second;
-        auto& in = ws->Input<CPUBackend>(0, j);
+
+        auto &in = ws->Input<CPUBackend>(0, j);
         auto file_name = in.GetSourceInfo();
         auto in_size = in.size();
         const auto *data = in.data<uint8_t>();
         auto *output_data = output.mutable_tensor<uint8_t>(j);
+        if (DeferCacheLoad(file_name, output.mutable_tensor<uint8_t>(j)))
+          continue;
 
+        const auto &dims = output_shape_[j];
+        const ImageCache::ImageShape output_shape{dims[0], dims[1], dims[2]};
         auto info = output_info_[j];
 
-        thread_pool_.DoWorkWithID(std::bind(
-              [this, info, data, in_size, output_data, file_name](int idx, int tid) {
-                const int stream_idx = tid;
-                DecodeSingleSample(idx,
-                             stream_idx,
-                             handle_,
-                             states_[stream_idx],
-                             info,
-                             data, in_size,
-                             output_data,
-                             streams_[stream_idx],
-                             file_name);
-              }, j, std::placeholders::_1));
+        thread_pool_.DoWorkWithID(
+          [this, info, data, in_size, output_data, output_shape, file_name, j](int tid) {
+            const int stream_idx = tid;
+            int idx = j;
+
+            DecodeSingleSample(
+              idx,
+              stream_idx,
+              handle_,
+              states_[stream_idx],
+              info,
+              data, in_size,
+              output_data,
+              streams_[stream_idx],
+              file_name);
+
+            CacheStore(file_name, output_data, output_shape, streams_[stream_idx]);
+          });
       }
+      LoadDeferred(ws->stream());
       // Make sure work is finished being submitted
       thread_pool_.WaitForWork();
     }
@@ -372,7 +389,7 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
 
     // If image is somehow not supported try hostdecoder
     if (ret != NVJPEG_STATUS_SUCCESS) {
-      if (ret == NVJPEG_STATUS_JPEG_NOT_SUPPORTED) {
+      if (ret == NVJPEG_STATUS_JPEG_NOT_SUPPORTED || ret == NVJPEG_STATUS_BAD_JPEG) {
         OCVFallback(data, in_size, output, stream, file_name);
         CUDA_CALL(cudaStreamSynchronize(stream));
         return;
@@ -472,11 +489,11 @@ class nvJPEGDecoder : public Operator<MixedBackend> {
   // output pointers
   vector<nvjpegImage_t> batched_output_;
 
-  // Thread pool
-  ThreadPool thread_pool_;
-
   // device id
   int device_id_;
+
+  // Thread pool
+  ThreadPool thread_pool_;
 };
 
 }  // namespace dali

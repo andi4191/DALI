@@ -116,7 +116,7 @@ void ExposeTensor(py::module &m) { // NOLINT
           for (auto &dim : info.shape) {
             i_shape.push_back(dim);
           }
-          size_t bytes = Product(i_shape) * info.itemsize;
+          size_t bytes = volume(i_shape) * info.itemsize;
 
           // Validate the stride
           ssize_t dim_prod = 1;
@@ -221,7 +221,7 @@ void ExposeTensorList(py::module &m) { // NOLINT
             tensor_shape[i-1] = info.shape[i];
           }
           std::vector<Dims> i_shape(info.shape[0], tensor_shape);
-          size_t bytes = Product(tensor_shape)*i_shape.size()*info.itemsize;
+          size_t bytes = volume(tensor_shape)*i_shape.size()*info.itemsize;
 
           // Validate the stride
           ssize_t dim_prod = 1;
@@ -273,13 +273,30 @@ void ExposeTensorList(py::module &m) { // NOLINT
       ----------
       )code")
     .def("as_array", [](TensorList<CPUBackend> &t) -> py::array {
-          DALI_ENFORCE(IsValidType(t.type()), "Cannot produce "
-              "buffer info for tensor w/ invalid type.");
-          DALI_ENFORCE(t.IsDenseTensor(),
-                      "Tensors in the list must have the same shape");
+          void* raw_mutable_data = nullptr;
+          std::string format;
+          size_t type_size;
 
-          std::vector<ssize_t> shape(t.tensor_shape(0).size() + 1);
-          std::vector<ssize_t> stride(t.tensor_shape(0).size() + 1);
+          if (t.size() > 0) {
+            DALI_ENFORCE(IsValidType(t.type()), "Cannot produce "
+                "buffer info for tensor w/ invalid type.");
+            DALI_ENFORCE(t.IsDenseTensor(),
+                        "Tensors in the list must have the same shape");
+            raw_mutable_data = t.raw_mutable_data();
+          }
+
+          if (IsValidType(t.type())) {
+            format = FormatStrFromType(t.type());
+            type_size = t.type().size();
+          } else {
+            // Default is float
+            format = py::format_descriptor<float>::format();
+            type_size = sizeof(float);
+          }
+
+          auto shape_size = t.shape().size() > 0 ? t.tensor_shape(0).size() : 0;
+          std::vector<ssize_t> shape(shape_size + 1);
+          std::vector<ssize_t> strides(shape_size + 1);
           size_t dim_prod = 1;
           for (size_t i = 0; i < shape.size(); ++i) {
             if (i == 0) {
@@ -289,7 +306,7 @@ void ExposeTensorList(py::module &m) { // NOLINT
             }
 
             // We iterate over stride backwards
-            stride[(stride.size()-1) - i] = t.type().size()*dim_prod;
+            strides[(strides.size()-1) - i] = type_size*dim_prod;
             if (i == shape.size() - 1) {
               dim_prod *= t.shape().size();
             } else {
@@ -298,10 +315,10 @@ void ExposeTensorList(py::module &m) { // NOLINT
           }
 
           return py::array(py::buffer_info(
-              t.raw_mutable_data(),
-              t.type().size(),
-              FormatStrFromType(t.type()),
-              shape.size(), shape, stride));
+              raw_mutable_data,
+              type_size,
+              std::move(format),
+              shape.size(), shape, strides));
         },
       R"code(
       Returns TensorList as a numpy array. TensorList must be dense.
@@ -418,21 +435,15 @@ void ExposeTensorList(py::module &m) { // NOLINT
       py::return_value_policy::reference_internal);
 }
 
-static vector<string> GetRegisteredCPUOps() {
-  return CPUOperatorRegistry::Registry().RegisteredNames();
+#define GetRegisteredOpsFor(OPTYPE)                                           \
+static vector<string> GetRegistered##OPTYPE##Ops(bool internal_ops = false) { \
+  return OPTYPE##OperatorRegistry::Registry().RegisteredNames(internal_ops);  \
 }
-
-static vector<string> GetRegisteredGPUOps() {
-  return GPUOperatorRegistry::Registry().RegisteredNames();
-}
-
-static vector<string> GetRegisteredMixedOps() {
-  return MixedOperatorRegistry::Registry().RegisteredNames();
-}
-
-static vector<string> GetRegisteredSupportOps() {
-  return SupportOperatorRegistry::Registry().RegisteredNames();
-}
+GetRegisteredOpsFor(CPU)
+GetRegisteredOpsFor(GPU)
+GetRegisteredOpsFor(Mixed)
+GetRegisteredOpsFor(Support)
+#undef GetRegisteredOpsFor
 
 static const OpSchema &GetSchema(const string &name) {
   return SchemaRegistry::GetSchema(name);
@@ -530,6 +541,9 @@ PYBIND11_MODULE(backend_impl, m) {
     .value("INTERP_NN", DALI_INTERP_NN)
     .value("INTERP_LINEAR", DALI_INTERP_LINEAR)
     .value("INTERP_CUBIC", DALI_INTERP_CUBIC)
+    .value("INTERP_LANCZOS3", DALI_INTERP_LANCZOS3)
+    .value("INTERP_TRIANGULAR", DALI_INTERP_TRIANGULAR)
+    .value("INTERP_GAUSSIAN", DALI_INTERP_GAUSSIAN)
     .export_values();
 
   // DALITensorLayout
@@ -537,6 +551,7 @@ PYBIND11_MODULE(backend_impl, m) {
     .value("NCHW", DALI_NCHW)
     .value("NHWC", DALI_NHWC)
     .value("NFHWC", DALI_NFHWC)
+    .value("NFCHW", DALI_NFCHW)
     .value("SAME", DALI_SAME)
     .export_values();
 
@@ -557,11 +572,12 @@ PYBIND11_MODULE(backend_impl, m) {
             [](int batch_size, int num_threads, int device_id, int64_t seed = -1,
                 bool pipelined_execution = true, int prefetch_queue_depth = 2,
                 bool async_execution = true, size_t bytes_per_sample_hint = 0,
-                bool set_affinity = false, int max_num_stream = -1) {
+                bool set_affinity = false, int max_num_stream = -1,
+                int default_cuda_stream_priority = 0) {
               return std::unique_ptr<Pipeline>(
                   new Pipeline(batch_size, num_threads, device_id, seed, pipelined_execution,
                       prefetch_queue_depth, async_execution, bytes_per_sample_hint, set_affinity,
-                      max_num_stream));
+                      max_num_stream, default_cuda_stream_priority));
             }),
         "batch_size"_a,
         "num_threads"_a,
@@ -572,7 +588,8 @@ PYBIND11_MODULE(backend_impl, m) {
         "exec_async"_a,
         "bytes_per_sample_hint"_a = 0,
         "set_affinity"_a = false,
-        "max_num_stream"_a = -1
+        "max_num_stream"_a = -1,
+        "default_cuda_stream_priority"_a = 0
         )
     // initialize from serialized pipeline
     .def(py::init(
@@ -580,13 +597,13 @@ PYBIND11_MODULE(backend_impl, m) {
              int batch_size, int num_threads, int device_id,
              bool pipelined_execution = true,  int prefetch_queue_depth = 2,
              bool async_execution = true, size_t bytes_per_sample_hint = 0,
-             bool set_affinity = false,
-             int max_num_stream = -1) {
+             bool set_affinity = false, int max_num_stream = -1,
+             int default_cuda_stream_priority = 0) {
               return std::unique_ptr<Pipeline>(
                   new Pipeline(serialized_pipe,
                                batch_size, num_threads, device_id, pipelined_execution,
                                prefetch_queue_depth, async_execution, bytes_per_sample_hint,
-                               set_affinity, max_num_stream));
+                               set_affinity, max_num_stream, default_cuda_stream_priority));
             }),
         "serialized_pipe"_a,
         "batch_size"_a,
@@ -597,7 +614,8 @@ PYBIND11_MODULE(backend_impl, m) {
         "exec_async"_a,
         "bytes_per_sample_hint"_a = 0,
         "set_affinity"_a = false,
-        "max_num_stream"_a = -1
+        "max_num_stream"_a = -1,
+        "default_cuda_stream_priority"_a = 0
         )
     .def("AddOperator", &Pipeline::AddOperator)
     .def("GetOperatorNode", &Pipeline::GetOperatorNode)
@@ -609,6 +627,17 @@ PYBIND11_MODULE(backend_impl, m) {
         [](Pipeline *p) {
           p->Build();
           })
+    .def("SetExecutionTypes",
+        [](Pipeline *p, bool exec_pipelined, bool exec_separated, bool exec_async) {
+          p->SetExecutionTypes(exec_pipelined, exec_separated, exec_async);
+        },
+        "exec_pipelined"_a = true,
+        "exec_separated"_a = false,
+        "exec_async"_a = true)
+    .def("SetQueueSizes",
+        [](Pipeline *p, int cpu_size, int gpu_size) {
+          p->SetQueueSizes(cpu_size, gpu_size);
+        })
     .def("SetOutputNames",
         [](Pipeline *p, const std::vector<std::pair<string, string>>& outputs) {
           p->SetOutputNames(outputs);
@@ -732,10 +761,10 @@ PYBIND11_MODULE(backend_impl, m) {
         }, py::return_value_policy::take_ownership);
 
   // Registries for cpu, gpu & mixed operators
-  m.def("RegisteredCPUOps", &GetRegisteredCPUOps);
-  m.def("RegisteredGPUOps", &GetRegisteredGPUOps);
-  m.def("RegisteredMixedOps", &GetRegisteredMixedOps);
-  m.def("RegisteredSupportOps", &GetRegisteredSupportOps);
+  m.def("RegisteredCPUOps", &GetRegisteredCPUOps, py::arg("internal_ops") = false);
+  m.def("RegisteredGPUOps", &GetRegisteredGPUOps, py::arg("internal_ops") = false);
+  m.def("RegisteredMixedOps", &GetRegisteredMixedOps, py::arg("internal_ops") = false);
+  m.def("RegisteredSupportOps", &GetRegisteredSupportOps, py::arg("internal_ops") = false);
 
   // Registry for OpSchema
   m.def("GetSchema", &GetSchema, py::return_value_policy::reference);
@@ -756,7 +785,10 @@ PYBIND11_MODULE(backend_impl, m) {
     .def("IsArgumentOptional", &OpSchema::HasOptionalArgument,
         "arg_name"_a,
         "local_only"_a = false)
-    .def("IsTensorArgument", &OpSchema::IsTensorArgument);
+    .def("IsTensorArgument", &OpSchema::IsTensorArgument)
+    .def("IsSequenceOperator", &OpSchema::IsSequenceOperator)
+    .def("AllowsSequences", &OpSchema::AllowsSequences)
+    .def("IsInternal", &OpSchema::IsInternal);
 
   ExposeTensor(m);
   ExposeTensorList(m);

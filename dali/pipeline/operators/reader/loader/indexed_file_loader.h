@@ -29,52 +29,61 @@ namespace dali {
 
 class IndexedFileLoader : public Loader<CPUBackend, Tensor<CPUBackend>> {
  public:
-  explicit IndexedFileLoader(const OpSpec& options, bool init = true)
+  explicit IndexedFileLoader(const OpSpec& options)
     : Loader(options),
+      uris_(options.GetRepeatedArgument<std::string>("path")),
+      index_uris_(options.GetRepeatedArgument<std::string>("index_path")),
       current_file_(nullptr) {
-      // trick for https://stackoverflow.com/questions/962132/calling-virtual-functions-inside-constructors
-      if (init)
-        Init(options);
     }
 
-  void ReadSample(Tensor<CPUBackend>* tensor) override {
-    if (current_index_ == indices_.size()) {
-      Reset();
-    }
+  void ReadSample(Tensor<CPUBackend>& tensor) override {
+    MoveToNextShard(current_index_);
+
     int64 seek_pos, size;
     size_t file_index;
     std::tie(seek_pos, size, file_index) = indices_[current_index_];
+    ++current_index_;
+
+    std::string image_key = uris_[file_index] + " at index " + to_string(seek_pos);
+    tensor.SetSourceInfo(image_key);
+    tensor.SetSkipSample(false);
+
     if (file_index != current_file_index_) {
       current_file_->Close();
       current_file_ = FileStream::Open(uris_[file_index], read_ahead_);
       current_file_index_ = file_index;
     }
 
+    // if image is cached, skip loading
+    if (ShouldSkipImage(image_key)) {
+      tensor.set_type(TypeInfo::Create<uint8_t>());
+      tensor.Resize({1});
+      tensor.SetSkipSample(true);
+      should_seek_ = true;
+      return;
+    }
+
+    if (should_seek_) {
+      current_file_->Seek(seek_pos);
+      should_seek_ = false;
+    }
+
     if (!copy_read_data_) {
       auto p = current_file_->Get(size);
       DALI_ENFORCE(p != nullptr, "Error reading from a file " + uris_[current_file_index_]);
       // Wrap the raw data in the Tensor object.
-      tensor->ShareData(p, size, {size});
-
-      TypeInfo type;
-      type.SetType<uint8_t>();
-      tensor->set_type(type);
+      tensor.ShareData(p, size, {size});
+      tensor.set_type(TypeInfo::Create<uint8_t>());
     } else {
-      tensor->Resize({size});
-      tensor->mutable_data<uint8_t>();
+      tensor.set_type(TypeInfo::Create<uint8_t>());
+      tensor.Resize({size});
 
-      int64 n_read = current_file_->Read(reinterpret_cast<uint8_t*>(tensor->raw_mutable_data()),
+      int64 n_read = current_file_->Read(reinterpret_cast<uint8_t*>(tensor.raw_mutable_data()),
                           size);
       DALI_ENFORCE(n_read == size, "Error reading from a file " + uris_[current_file_index_]);
     }
 
-    tensor->SetSourceInfo(uris_[current_file_index_] + " at index " + to_string(seek_pos));
-    ++current_index_;
     return;
-  }
-
-  Index Size() override {
-    return indices_.size();
   }
 
   ~IndexedFileLoader() override {
@@ -98,29 +107,34 @@ class IndexedFileLoader : public Loader<CPUBackend, Tensor<CPUBackend>> {
   }
 
  protected:
-  void Init(const OpSpec& options) {
-    uris_ = options.GetRepeatedArgument<std::string>("path");
+  Index SizeImpl() override {
+    return indices_.size();
+  }
+
+  void PrepareMetadataImpl() override {
     DALI_ENFORCE(!uris_.empty(), "No files specified.");
-    std::vector<std::string> index_uris = options.GetRepeatedArgument<std::string>("index_path");
-    ReadIndexFile(index_uris);
-    size_t num_indices = indices_.size();
-    current_index_ = start_index(shard_id_, num_shards_, num_indices);
-    int64 seek_pos, size;
-    std::tie(seek_pos, size, current_file_index_) = indices_[current_index_];
-    current_file_ = FileStream::Open(uris_[current_file_index_], read_ahead_);
-    current_file_->Seek(seek_pos);
+    ReadIndexFile(index_uris_);
+    DALI_ENFORCE(!indices_.empty(), "Content of index files should not be empty");
+    current_file_index_ = INVALID_INDEX;
+    Reset(true);
 
     mmap_reserver = FileStream::FileStreamMappinReserver(uris_.size());
     copy_read_data_ = !mmap_reserver.CanShareMappedData();
   }
 
-  void Reset() {
-    current_index_ = 0;
+  void Reset(bool wrap_to_shard) override {
     int64 seek_pos, size;
     size_t file_index;
+    if (wrap_to_shard) {
+      current_index_ = start_index(shard_id_, num_shards_, Size());
+    } else {
+      current_index_ = 0;
+    }
     std::tie(seek_pos, size, file_index) = indices_[current_index_];
     if (file_index != current_file_index_) {
-      current_file_->Close();
+      if (current_file_index_ != static_cast<size_t>(INVALID_INDEX)) {
+        current_file_->Close();
+      }
       current_file_ = FileStream::Open(uris_[file_index], read_ahead_);
       current_file_index_ = file_index;
     }
@@ -128,11 +142,14 @@ class IndexedFileLoader : public Loader<CPUBackend, Tensor<CPUBackend>> {
   }
 
   std::vector<std::string> uris_;
+  std::vector<std::string> index_uris_;
   std::vector<std::tuple<int64, int64, size_t>> indices_;
   size_t current_index_;
   size_t current_file_index_;
   std::unique_ptr<FileStream> current_file_;
   FileStream::FileStreamMappinReserver mmap_reserver;
+  static constexpr int INVALID_INDEX = -1;
+  bool should_seek_ = false;
 };
 
 }  // namespace dali

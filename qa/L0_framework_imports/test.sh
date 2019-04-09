@@ -1,6 +1,7 @@
 #!/bin/bash -e
 # used pip packages
-pip_packages="jupyter matplotlib opencv-python mxnet-cu90 tensorflow-gpu torchvision torch keras-preprocessing" # TODO(janton): remove explicit keras-preprocessing dependency when it is fixed
+
+pip_packages=" mxnet-cu##CUDA_VERSION## tensorflow-gpu torchvision torch"
 
 test_body() {
     # test code

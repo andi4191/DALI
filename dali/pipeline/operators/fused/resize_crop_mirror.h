@@ -24,7 +24,15 @@
 #include "dali/image/transform.h"
 #include "dali/pipeline/operators/operator.h"
 #include "dali/pipeline/operators/common.h"
-#include "dali/pipeline/operators/crop/crop.h"
+#include "dali/pipeline/operators/crop/crop_attr.h"
+
+#if defined(__AARCH64_QNX__)
+typedef unsigned int uint;
+#endif
+
+#if defined(__AARCH64_QNX__)
+typedef unsigned int uint;
+#endif
 
 #if defined(__AARCH64_QNX__)
 typedef unsigned int uint;
@@ -117,8 +125,16 @@ class ResizeCropMirrorAttr : protected CropAttr {
       }
     }
 
-    if (flag & t_crop)
-      meta.crop = SetCropXY(spec, ws, index, meta.rsz_h, meta.rsz_w);
+    if (flag & t_crop) {
+      auto crop_x_norm = spec.GetArgument<float>("crop_pos_x", ws, index);
+      auto crop_y_norm = spec.GetArgument<float>("crop_pos_y", ws, index);
+      meta.crop = CalculateCropYX(
+        crop_y_norm,
+        crop_x_norm,
+        crop_height_[index],
+        crop_width_[index],
+        meta.rsz_h, meta.rsz_w);
+    }
 
     if (flag & t_mirrorHor) {
       // Set mirror parameters
@@ -126,6 +142,24 @@ class ResizeCropMirrorAttr : protected CropAttr {
     }
 
     return meta;
+  }
+
+  /**
+   * @brief Enforce that all shapes match
+   *
+   * @param ws
+   * @return const vector<Index> One matching shape for all inputs
+   */
+  virtual const std::vector<Index> CheckShapes(const SampleWorkspace *ws) {
+    const auto &input = ws->Input<CPUBackend>(0);
+    // enforce that all shapes match
+    for (int i = 1; i < ws->NumInput(); ++i) {
+      DALI_ENFORCE(input.SameShape(ws->Input<CPUBackend>(i)));
+    }
+
+    DALI_ENFORCE(input.ndim() == 3, "Operator expects 3-dimensional image input.");
+
+    return input.shape();
   }
 
   inline const TransformMeta GetTransfomMeta(const SampleWorkspace *ws, const OpSpec &spec) {

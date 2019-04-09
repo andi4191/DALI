@@ -220,7 +220,7 @@ void VideoLoader::read_file() {
     auto& file = get_or_open_file(req.filename);
 
     if (vid_decoder_) {
-        vid_decoder_->push_req(std::move(req));
+        vid_decoder_->push_req(req);
     } else {
         DALI_FAIL("No video decoder even after opening a file");
     }
@@ -397,6 +397,8 @@ void VideoLoader::receive_frames(SequenceWrapper& sequence) {
                 << "frames being used.\e[0m  Consider reencoding the video with a "
                 << "smaller key frame interval (GOP length).";
   }
+  // We have to wait for all kernel recorded in sequence's event are completed
+  sequence.wait();
 }
 
 std::pair<int, int> VideoLoader::load_width_height(const std::string& filename) {
@@ -436,22 +438,21 @@ std::pair<int, int> VideoLoader::load_width_height(const std::string& filename) 
                         codecpar(stream)->height);
 }
 
-void VideoLoader::PrepareEmpty(SequenceWrapper *tensor) {
-  tensor->initialize(count_, height_, width_, 3);
+void VideoLoader::PrepareEmpty(SequenceWrapper &tensor) {
+  tensor.initialize(count_, height_, width_, 3);
 }
 
-void VideoLoader::ReadSample(SequenceWrapper* tensor) {
+void VideoLoader::ReadSample(SequenceWrapper& tensor) {
     // TODO(spanev) remove the async between the 2 following methods?
     auto& fileidx_frame = frame_starts_[current_frame_idx_];
     push_sequence_to_read(filenames_[fileidx_frame.first], fileidx_frame.second, count_);
-    receive_frames(*tensor);
-    tensor->wait();
-    if (++current_frame_idx_ >= static_cast<Index>(frame_starts_.size())) {
-      current_frame_idx_ = 0;
-    }
+    receive_frames(tensor);
+    ++current_frame_idx_;
+
+    MoveToNextShard(current_frame_idx_);
 }
 
-Index VideoLoader::Size() {
+Index VideoLoader::SizeImpl() {
     return static_cast<Index>(frame_starts_.size());
 }
 

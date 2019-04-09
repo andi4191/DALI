@@ -41,6 +41,8 @@ using DeviceOutputType = shared_ptr<TensorList<Backend>>;
  */
 class DLL_PUBLIC DeviceWorkspace : public WorkspaceBase<DeviceInputType, DeviceOutputType> {
  public:
+  using WorkspaceBase<DeviceInputType, DeviceOutputType>::input_t;
+  using WorkspaceBase<DeviceInputType, DeviceOutputType>::output_t;
   DLL_PUBLIC DeviceWorkspace() : stream_(0) {}
   DLL_PUBLIC ~DeviceWorkspace() override = default;
 
@@ -64,6 +66,15 @@ class DLL_PUBLIC DeviceWorkspace : public WorkspaceBase<DeviceInputType, DeviceO
    */
   template <typename Backend>
   DLL_PUBLIC const TensorList<Backend>& Input(int idx) const;
+
+  /**
+   * @brief Returns the input non-const TensorList at index `idx`.
+   *
+   * @throws runtime_error If calling type does not match the type of
+   * the output at the given index.
+   */
+  template <typename Backend>
+  DLL_PUBLIC TensorList<Backend>& MutableInput(int idx);
 
   /**
    * @brief Returns the output TensorList at index `idx`.

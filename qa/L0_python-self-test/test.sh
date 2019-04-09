@@ -1,6 +1,6 @@
 #!/bin/bash -e
 # used pip packages
-pip_packages="nose opencv-python numpy tensorflow-gpu keras-preprocessing"  # TODO(janton): remove explicit keras-preprocessing dependency when it is fixed
+pip_packages="nose numpy opencv-python tensorflow-gpu torchvision mxnet-cu##CUDA_VERSION##"
 
 pushd ../..
 
@@ -8,8 +8,13 @@ cd dali/test/python
 
 test_body() {
     # test code
+    nosetests --verbose test_backend_impl.py
     nosetests --verbose test_pipeline.py
     nosetests --verbose test_plugin_manager.py
+
+    python test_detection_pipeline.py -i 300
+    python test_RN50_data_pipeline.py -i 10
+    python test_RN50_data_fw_iterators.py -i 30 -b 13
 
     # DALI TF tests
 

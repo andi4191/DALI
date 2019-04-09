@@ -14,6 +14,7 @@
 
 # Add all subdirectories
 add_subdirectory(data)
+add_subdirectory(graph)
 add_subdirectory(operators)
 add_subdirectory(util)
 add_subdirectory(workspace)

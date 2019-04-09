@@ -1,6 +1,9 @@
 #!/bin/bash -e
+
+source ../setup_test.sh
+
 # used pip packages
-pip_packages="jupyter matplotlib opencv-python mxnet-cu90 tensorflow-gpu torchvision torch keras-preprocessing"  # TODO(janton): remove explicit keras-preprocessing dependency when it is fixed
+pip_packages="jupyter matplotlib mxnet-cu##CUDA_VERSION## tensorflow-gpu torchvision torch"
 
 # We need cmake to run the custom plugin notebook + ffmpeg and wget for video example
 apt-get update
@@ -14,12 +17,15 @@ mkdir -p idx_files
 cd docs/examples
 
 test_body() {
+    # dummy patern
+    black_list_files="#"
+
     # test code
-    find */* -name "*.ipynb" | xargs -i jupyter nbconvert \
+    find */* -name "*.ipynb" | sed "/${black_list_files}/d" | xargs -i jupyter nbconvert \
                    --to notebook --inplace --execute \
                    --ExecutePreprocessor.kernel_name=python${PYVER:0:1} \
                    --ExecutePreprocessor.timeout=600 {}
-    find */* -name "main.py" | xargs -i python${PYVER:0:1} {} -t
+    python${PYVER:0:1} pytorch/resnet50/main.py -t
 }
 
 source ../../qa/test_template.sh

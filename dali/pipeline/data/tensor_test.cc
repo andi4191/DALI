@@ -16,6 +16,8 @@
 
 #include <gtest/gtest.h>
 
+#include <numeric>
+
 #include "dali/pipeline/data/backend.h"
 #include "dali/pipeline/data/buffer.h"
 #include "dali/test/dali_test.h"
@@ -39,8 +41,11 @@ class TensorTest : public DALITest {
     return shape;
   }
 
-  vector<Index> GetRandShape() {
-    int dims = this->RandInt(1, 5);
+
+  vector<Index> GetRandShape(int dims = -1) {
+    if (dims < 0) {
+      dims = this->RandInt(1, 5);
+    }
     vector<Index> shape(dims, 0);
     for (auto &val : shape) {
       val = this->RandInt(1, 32);
@@ -51,7 +56,7 @@ class TensorTest : public DALITest {
 
 typedef ::testing::Types<CPUBackend,
                          GPUBackend> Backends;
-TYPED_TEST_CASE(TensorTest, Backends);
+TYPED_TEST_SUITE(TensorTest, Backends);
 
 // Sharing data from a raw pointer resets a Tensor to
 // and invalid state (no type). To get to a valid state
@@ -80,7 +85,7 @@ TYPED_TEST(TensorTest, TestGetTypeSizeBytes) {
   // Give the tensor a size. This
   // should trigger an allocation
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   t.Resize(shape);
 
   // Validate the internals
@@ -96,7 +101,7 @@ TYPED_TEST(TensorTest, TestGetSizeTypeBytes) {
 
   // Give the tensor a size
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   t.Resize(shape);
 
   ASSERT_EQ(t.size(), size);
@@ -120,7 +125,7 @@ TYPED_TEST(TensorTest, TestGetBytesTypeSizeNoAlloc) {
 
   // Get an allocation
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   float *ptr = new float[size];
 
   // Wrap the allocation
@@ -159,7 +164,7 @@ TYPED_TEST(TensorTest, TestGetBytesTypeSizeAlloc) {
 
   // Get an allocation
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   float *ptr = new float[size];
 
   // Wrap the allocation
@@ -198,7 +203,7 @@ TYPED_TEST(TensorTest, TestGetBytesSizeTypeNoAlloc) {
 
   // Get an allocation
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   float *ptr = new float[size];
 
   // Wrap the allocation
@@ -235,7 +240,7 @@ TYPED_TEST(TensorTest, TestGetBytesSizeTypeAlloc) {
 
   // Get an allocation
   auto shape = this->GetRandShape();
-  auto size = Product(shape);
+  auto size = volume(shape);
   float *ptr = new float[size];
 
   // Wrap the allocation
@@ -289,10 +294,50 @@ TYPED_TEST(TensorTest, TestShareData) {
     ASSERT_EQ(tensor.type(), tl.type());
     ASSERT_EQ(tensor.shape(), tl.tensor_shape(i));
 
-    Index size = Product(tl.tensor_shape(i));
+    Index size = volume(tl.tensor_shape(i));
     ASSERT_EQ(tensor.size(), size);
     ASSERT_EQ(tensor.nbytes(), size*sizeof(float));
   }
+}
+
+TYPED_TEST(TensorTest, TestCopyToTensorList) {
+  std::vector<Tensor<TypeParam>> tensors(16);
+  for (auto& t : tensors) {
+    vector<Index> shape = this->GetRandShape(4);
+    t.Resize(shape);
+    t.template mutable_data<float>();
+  }
+
+  TensorList<TypeParam> tl;
+  tl.Copy(tensors, 0);
+
+  int num_tensor = tl.ntensor();
+  ASSERT_EQ(num_tensor, tensors.size());
+  for (int i = 0; i < num_tensor; ++i) {
+    ASSERT_EQ(tensors[i].type(), tl.type());
+    ASSERT_EQ(tensors[i].shape(), tl.tensor_shape(i));
+    Index size = volume(tl.tensor_shape(i));
+    ASSERT_EQ(tensors[i].size(), size);
+    ASSERT_EQ(tensors[i].nbytes(), size*sizeof(float));
+  }
+}
+
+TYPED_TEST(TensorTest, TestCopyEmptyToTensorList) {
+  std::vector<Tensor<TypeParam>> tensors(16);
+  // Empty tensors
+  TensorList<TypeParam> tl;
+  tl.template mutable_data<float>();
+  tl.Copy(tensors, 0);
+
+  Tensor<TypeParam> tensor;
+  int num_tensor = tl.ntensor();
+  ASSERT_EQ(num_tensor, tensors.size());
+  const std::vector<Dims>& shape = tl.shape();
+  Index total_volume = std::accumulate(shape.begin(), shape.end(), 0,
+                                     [](dali::Index acc, const dali::Dims& s) {
+                                       return acc + dali::volume(s);
+                                     });
+  ASSERT_EQ(total_volume, 0);
 }
 
 TYPED_TEST(TensorTest, TestResize) {
@@ -304,7 +349,7 @@ TYPED_TEST(TensorTest, TestResize) {
 
   // Verify the settings
   ASSERT_NE(tensor.template mutable_data<float>(), nullptr);
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
   for (size_t i = 0; i < shape.size(); ++i) {
     ASSERT_EQ(tensor.dim(i), shape[i]);
@@ -322,7 +367,7 @@ TYPED_TEST(TensorTest, TestMultipleResize) {
 
     // Verify the settings
     ASSERT_NE(tensor.template mutable_data<float>(), nullptr);
-    ASSERT_EQ(tensor.size(), Product(shape));
+    ASSERT_EQ(tensor.size(), volume(shape));
     ASSERT_EQ(tensor.ndim(), shape.size());
     for (size_t i = 0; i < shape.size(); ++i) {
       ASSERT_EQ(tensor.dim(i), shape[i]);
@@ -339,7 +384,7 @@ TYPED_TEST(TensorTest, TestResizeScalar) {
 
   // Verify the settings
   ASSERT_NE(tensor.template mutable_data<float>(), nullptr);
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
 }
 
@@ -352,7 +397,7 @@ TYPED_TEST(TensorTest, TestResizeZeroSize) {
 
   // Verify the settings
   ASSERT_EQ(tensor.template mutable_data<float>(), nullptr);
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
 }
 
@@ -365,7 +410,7 @@ TYPED_TEST(TensorTest, TestTypeChange) {
 
   // Verify the settings
   ASSERT_NE(tensor.template mutable_data<float>(), nullptr);
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
   for (size_t i = 0; i < shape.size(); ++i) {
     ASSERT_EQ(tensor.dim(i), shape[i]);
@@ -379,7 +424,7 @@ TYPED_TEST(TensorTest, TestTypeChange) {
   tensor.template mutable_data<int>();
 
   // Verify the settings
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
   for (size_t i = 0; i < shape.size(); ++i) {
     ASSERT_EQ(tensor.dim(i), shape[i]);
@@ -393,7 +438,7 @@ TYPED_TEST(TensorTest, TestTypeChange) {
   tensor.template mutable_data<uint8>();
 
   // Verify the settings
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
   for (size_t i = 0; i < shape.size(); ++i) {
     ASSERT_EQ(tensor.dim(i), shape[i]);
@@ -407,7 +452,7 @@ TYPED_TEST(TensorTest, TestTypeChange) {
   tensor.template mutable_data<double>();
 
   // Verify the settings
-  ASSERT_EQ(tensor.size(), Product(shape));
+  ASSERT_EQ(tensor.size(), volume(shape));
   ASSERT_EQ(tensor.ndim(), shape.size());
   for (size_t i = 0; i < shape.size(); ++i) {
     ASSERT_EQ(tensor.dim(i), shape[i]);

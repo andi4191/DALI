@@ -19,7 +19,7 @@ namespace dali {
 template <typename ImgType>
 class nvjpegDecodeTest : public GenericDecoderTest<ImgType> {
  protected:
-  const OpSpec DecodingOp() const override {
+  OpSpec DecodingOp() const override {
     return OpSpec("nvJPEGDecoder")
       .AddArg("device", "mixed")
       .AddArg("output_type", this->img_type_)
@@ -31,19 +31,19 @@ class nvjpegDecodeTest : public GenericDecoderTest<ImgType> {
   void JpegTestDecode(bool batched, int num_threads) {
     batched_ = batched;
     this->SetNumThreads(num_threads);
-    this->RunTestDecode(t_jpegImgType, 0.7);
+    this->RunTestDecode(t_jpegImgType);
   }
 
   void PngTestDecode(bool batched, int num_threads) {
     batched_ = batched;
     this->SetNumThreads(num_threads);
-    this->RunTestDecode(t_pngImgType, 0.7);
+    this->RunTestDecode(t_pngImgType);
   }
 
   void TiffTestDecode(bool batched, int num_threads) {
     batched_ = batched;
     this->SetNumThreads(num_threads);
-    this->RunTestDecode(t_tiffImgType , 0.7);
+    this->RunTestDecode(t_tiffImgType);
   }
 
  private:
@@ -51,7 +51,7 @@ class nvjpegDecodeTest : public GenericDecoderTest<ImgType> {
 };
 
 typedef ::testing::Types<RGB, BGR, Gray> Types;
-TYPED_TEST_CASE(nvjpegDecodeTest, Types);
+TYPED_TEST_SUITE(nvjpegDecodeTest, Types);
 
 TYPED_TEST(nvjpegDecodeTest, TestSingleJPEGDecode) {
   this->JpegTestDecode(false, 1);
