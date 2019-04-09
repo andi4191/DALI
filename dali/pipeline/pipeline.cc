@@ -15,6 +15,7 @@
 #include "dali/pipeline/pipeline.h"
 
 #include <google/protobuf/message.h>
+#include <google/protobuf/io/coded_stream.h>
 
 #include <algorithm>
 #include <functional>
@@ -60,13 +61,21 @@ namespace dali {
     }
   }
 
-  Pipeline::Pipeline(const string &serialized_pipe, int batch_size, int num_threads, int device_id,
-                     bool pipelined_execution, int prefetch_queue_depth, bool async_execution,
-                     size_t bytes_per_sample_hint, bool set_affinity, int max_num_stream,
-                     int default_cuda_stream_priority)
-      : built_(false), separated_execution_(false) {
-    dali_proto::PipelineDef def;
-    def.ParseFromString(serialized_pipe);
+  Pipeline::Pipeline(const string &serialized_pipe,
+      int batch_size, int num_threads, int device_id,
+      bool pipelined_execution, int prefetch_queue_depth,
+      bool async_execution, size_t bytes_per_sample_hint,
+      bool set_affinity, int max_num_stream) : built_(false) {
+      dali_proto::PipelineDef def;
+      //  Reading Protobuf file has a limitation of 64 MB
+      //  Following instructions will increase the
+      //  limits to support the given pipeline
+      google::protobuf::io::CodedInputStream* coded_input =
+          new google::protobuf::io::CodedInputStream(
+          reinterpret_cast<const uint8_t*>(serialized_pipe.c_str()),
+          serialized_pipe.size());
+      coded_input->SetTotalBytesLimit(serialized_pipe.size(), 67108864);
+      def.ParseFromCodedStream(coded_input);
 
     // If not given, take parameters from the
     // serialized pipeline

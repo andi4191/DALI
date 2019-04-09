@@ -29,6 +29,7 @@ limitations under the License.
 #include "dali/error_handling.h"
 
 namespace dali {
+#if !defined(__AARCH64_GNU__) && !defined(__AARCH64_QNX__)
 namespace jpeg {
 
 // -----------------------------------------------------------------------------
@@ -786,4 +787,5 @@ string Compress(const void* srcdata, int width, int height,
 }
 
 }  // namespace jpeg
+#endif
 }  // namespace dali

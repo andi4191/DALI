@@ -26,6 +26,7 @@ limitations under the License.
 #include <stddef.h>
 
 namespace dali {
+#if !defined(__AARCH64_GNU__) && !defined(__AARCH64_QNX__)
 namespace jpeg {
 
 void CatchError(j_common_ptr cinfo) {
@@ -181,4 +182,5 @@ void SetSrc(j_decompress_ptr cinfo, const void *data,
 }
 
 }  // namespace jpeg
+#endif
 }  // namespace dali
