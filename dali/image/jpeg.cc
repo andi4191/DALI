@@ -15,9 +15,7 @@
 #include "dali/image/jpeg.h"
 #include <cmath>
 #include <memory>
-#if !defined(__AARCH64_QNX__)
 #include "dali/image/jpeg_mem.h"
-#endif
 #include "dali/util/ocv.h"
 
 namespace dali {
@@ -124,12 +122,8 @@ JpegImage::DecodeImpl(DALIImageType type, const uint8 *jpeg, size_t length) cons
 Image::ImageDims JpegImage::PeekDims(const uint8_t *encoded_buffer,
                                      size_t length) const {
   int height = 0, width = 0, components = 0;
-#ifdef DALI_USE_JPEG_TURBO
   DALI_ENFORCE(
     jpeg::GetImageInfo(encoded_buffer, length, &width, &height, &components) == true);
-#else
-  DALI_ENFORCE(get_jpeg_size(encoded_buffer, length, &height, &width));
-#endif
   return std::make_tuple(height, width, components);
 }
 
