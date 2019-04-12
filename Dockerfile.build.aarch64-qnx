@@ -91,7 +91,7 @@ RUN curl -L https://github.com/libjpeg-turbo/libjpeg-turbo/archive/${JPEG_TURBO_
 
 # OpenCV
 ENV OPENCV_VERSION=3.4.3
-COPY opencv-qnx.patch /opencv-qnx.patch
+COPY docker/opencv-qnx.patch /opencv-qnx.patch
 RUN curl -L https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.tar.gz | tar -xzf - && \
     cd /opencv-${OPENCV_VERSION} && git apply /opencv-qnx.patch \
     && mkdir build && cd build && \
