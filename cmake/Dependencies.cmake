@@ -115,9 +115,3 @@ list(APPEND DALI_EXCLUDES libprotobuf.a)
 list(APPEND DALI_EXCLUDES libsupc++.a;libstdc++.a;libstdc++_nonshared.a;)
 
 
-##################################################################
-# Turing Optical flow API
-##################################################################
-if(BUILD_NVOF)
-  include_directories(${PROJECT_SOURCE_DIR}/third_party/turing_of)
-endif()

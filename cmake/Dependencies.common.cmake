@@ -133,3 +133,10 @@ include_directories(${PROJECT_SOURCE_DIR}/third_party/boost/preprocessor/include
 # RapidJSON
 ##################################################################
 include_directories(${PROJECT_SOURCE_DIR}/third_party/rapidjson/include)
+
+##################################################################
+# Turing Optical flow API
+##################################################################
+if(BUILD_NVOF)
+  include_directories(${PROJECT_SOURCE_DIR}/third_party/turing_of)
+endif()
